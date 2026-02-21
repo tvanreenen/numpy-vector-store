@@ -369,6 +369,26 @@ class TestVectorStore:
         finally:
             Path(file_path).unlink(missing_ok=True)
 
+    def test_clear_then_save_overwrites_persisted_data(self):
+        """Test clear() + save() persists an empty store to disk."""
+        with tempfile.NamedTemporaryFile(suffix=".npz", delete=False) as tmp:
+            file_path = tmp.name
+
+        try:
+            store1 = VectorStore(dimensions=2, file_path=file_path)
+            add_single_vector(store1, np.array([1.0, 2.0]), {"id": "test"})
+            store1.save()
+
+            store1.clear()
+            store1.save()
+
+            store2 = VectorStore(dimensions=2, file_path=file_path)
+            store2.load()
+            assert len(store2.vectors) == 0
+            assert len(store2.metadata) == 0
+        finally:
+            Path(file_path).unlink(missing_ok=True)
+
     def test_add_vectors_mismatched_lengths(self):
         """Test adding vectors with mismatched vector and metadata lengths."""
         store = VectorStore(dimensions=2)

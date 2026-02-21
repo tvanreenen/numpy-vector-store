@@ -104,14 +104,11 @@ class VectorStore:
         if not self.file_path:
             return
 
-        if len(self.vectors) > 0:
-            vectors_array: np.ndarray = self.vectors.astype(np.float32)
-            # Preserve metadata dtype so structured arrays remain structured
-            # after save/load round-trips.
-            metadata_array = np.array(self.metadata, copy=True)
-            np.savez_compressed(
-                self.file_path, vectors=vectors_array, metadata=metadata_array
-            )
+        vectors_array: np.ndarray = self.vectors.astype(np.float32)
+        # Preserve metadata dtype so structured arrays remain structured
+        # after save/load round-trips.
+        metadata_array = np.array(self.metadata, copy=True)
+        np.savez_compressed(self.file_path, vectors=vectors_array, metadata=metadata_array)
 
     def search(
         self, query_vector: np.ndarray, top_k: int = 10, score_cutoff: float = 0.0
