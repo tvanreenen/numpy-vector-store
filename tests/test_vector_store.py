@@ -322,6 +322,20 @@ class TestVectorStore:
         with pytest.raises(ValueError, match="Query vector dimension"):
             store.search(query)
 
+    def test_search_raises_on_non_positive_top_k(self):
+        """Test search rejects non-positive top_k values."""
+        store = VectorStore(dimensions=3)
+        vectors_2d = np.array([[1.0, 0.0, 0.0]])
+        metadata_array = np.array([{"id": "x"}])
+        store.add_vectors(vectors_2d, metadata_array)
+        query = np.array([1.0, 0.0, 0.0])
+
+        with pytest.raises(ValueError, match="top_k"):
+            store.search(query, top_k=0)
+
+        with pytest.raises(ValueError, match="top_k"):
+            store.search(query, top_k=-1)
+
     def test_search_empty_store(self):
         """Test search on empty store."""
         store = VectorStore(dimensions=3)

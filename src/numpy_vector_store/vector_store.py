@@ -162,6 +162,9 @@ class VectorStore:
                 f"Query vector dimension {len(query_vector)} doesn't match store dimensions {self.dimensions}"
             )
 
+        if top_k <= 0:
+            raise ValueError("top_k must be greater than 0")
+
         if len(self.vectors) == 0:
             return []
 
