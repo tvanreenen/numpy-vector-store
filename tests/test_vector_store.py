@@ -350,6 +350,64 @@ class TestVectorStore:
         finally:
             Path(file_path).unlink(missing_ok=True)
 
+    def test_load_raises_on_vector_dimension_mismatch(self):
+        """Test load fails fast when persisted vector dimensions don't match store."""
+        with tempfile.NamedTemporaryFile(suffix=".npz", delete=False) as tmp:
+            file_path = tmp.name
+
+        try:
+            np.savez_compressed(
+                file_path,
+                vectors=np.array([[1.0, 2.0]], dtype=np.float32),
+                metadata=np.array([{"id": "test"}], dtype=object),
+            )
+
+            store = VectorStore(dimensions=3, file_path=file_path)
+            with pytest.raises(ValueError, match="Loaded vector dimension"):
+                store.load()
+        finally:
+            Path(file_path).unlink(missing_ok=True)
+
+    def test_load_raises_on_metadata_length_mismatch(self):
+        """Test load fails fast when vectors/metadata lengths are inconsistent."""
+        with tempfile.NamedTemporaryFile(suffix=".npz", delete=False) as tmp:
+            file_path = tmp.name
+
+        try:
+            np.savez_compressed(
+                file_path,
+                vectors=np.array([[1.0, 2.0], [3.0, 4.0]], dtype=np.float32),
+                metadata=np.array([{"id": "only-one"}], dtype=object),
+            )
+
+            store = VectorStore(dimensions=2, file_path=file_path)
+            with pytest.raises(ValueError, match="length mismatch"):
+                store.load()
+        finally:
+            Path(file_path).unlink(missing_ok=True)
+
+    def test_load_raises_on_structured_metadata_schema_mismatch(self):
+        """Test load fails fast when structured metadata schema differs."""
+        with tempfile.NamedTemporaryFile(suffix=".npz", delete=False) as tmp:
+            file_path = tmp.name
+
+        try:
+            np.savez_compressed(
+                file_path,
+                vectors=np.array([[1.0, 2.0]], dtype=np.float32),
+                metadata=np.array([("test1", 0.8)], dtype=[("id", "U10"), ("score", "f4")]),
+            )
+
+            store = VectorStore(
+                dimensions=2,
+                file_path=file_path,
+                metadata_schema={"id": "U10", "active": "?"},
+            )
+            with pytest.raises(ValueError, match="metadata schema"):
+                store.load()
+        finally:
+            Path(file_path).unlink(missing_ok=True)
+
     def test_save_no_file_path(self):
         """Test save with no file path."""
         store = VectorStore(dimensions=2)

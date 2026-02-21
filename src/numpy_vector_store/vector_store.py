@@ -91,9 +91,34 @@ class VectorStore:
 
         if self.file_path.exists():
             data = np.load(self.file_path, allow_pickle=True)
-            self.vectors = data["vectors"]
-            self.metadata = data["metadata"]
+            loaded_vectors = data["vectors"]
+            loaded_metadata = data["metadata"]
             data.close()
+
+            if loaded_vectors.ndim != 2:
+                raise ValueError("Loaded vectors must be a 2D array")
+
+            if loaded_vectors.shape[1] != self.dimensions:
+                raise ValueError(
+                    f"Loaded vector dimension {loaded_vectors.shape[1]} doesn't match store dimensions {self.dimensions}"
+                )
+
+            if len(loaded_vectors) != len(loaded_metadata):
+                raise ValueError("Loaded vectors and metadata length mismatch")
+
+            if self._use_structured and self._metadata_schema is not None:
+                expected_fields = tuple(self._metadata_schema.keys())
+                loaded_fields = loaded_metadata.dtype.names
+                if loaded_fields != expected_fields:
+                    raise ValueError(
+                        f"Loaded metadata schema {loaded_fields} doesn't match expected schema {expected_fields}"
+                    )
+                loaded_metadata = loaded_metadata.astype(
+                    np.dtype(self._create_dtype(self._metadata_schema)), copy=False
+                )
+
+            self.vectors = loaded_vectors
+            self.metadata = loaded_metadata
 
         self._loaded = True
 
