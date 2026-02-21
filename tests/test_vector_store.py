@@ -264,6 +264,38 @@ class TestVectorStore:
         assert len(store.vectors) == 0
         assert store.metadata.dtype.names == ("id", "score")
 
+    def test_structured_metadata_save_and_load(self):
+        """Test structured metadata survives save/load round-trip."""
+        with tempfile.NamedTemporaryFile(suffix=".npz", delete=False) as tmp:
+            file_path = tmp.name
+
+        try:
+            schema = {"id": "U10", "score": "f4"}
+
+            store1 = VectorStore(
+                dimensions=2, file_path=file_path, metadata_schema=schema
+            )
+            vectors_2d = np.array([[1.0, 2.0]])
+            metadata_array = np.array(
+                [("test1", 0.8)], dtype=[("id", "U10"), ("score", "f4")]
+            )
+            store1.add_vectors(vectors_2d, metadata_array)
+            store1.save()
+
+            store2 = VectorStore(
+                dimensions=2, file_path=file_path, metadata_schema=schema
+            )
+            store2.load()
+
+            assert store2.metadata.dtype.names == ("id", "score")
+            entry = store2.get(0)
+            assert entry is not None
+            _, metadata = entry
+            assert metadata["id"] == "test1"
+            assert metadata["score"] == pytest.approx(0.8)
+        finally:
+            Path(file_path).unlink(missing_ok=True)
+
     def test_search_wrong_dimensions(self):
         """Test search with wrong query dimensions."""
         store = VectorStore(dimensions=3)

@@ -106,7 +106,9 @@ class VectorStore:
 
         if len(self.vectors) > 0:
             vectors_array: np.ndarray = self.vectors.astype(np.float32)
-            metadata_array = np.array(self.metadata, dtype=object)
+            # Preserve metadata dtype so structured arrays remain structured
+            # after save/load round-trips.
+            metadata_array = np.array(self.metadata, copy=True)
             np.savez_compressed(
                 self.file_path, vectors=vectors_array, metadata=metadata_array
             )
