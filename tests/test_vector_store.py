@@ -456,6 +456,25 @@ class TestVectorStore:
         with pytest.raises(ValueError, match="Number of vectors must match"):
             store.add_vectors(vectors_2d, metadata_array)
 
+    def test_add_vectors_raises_on_zero_norm_vector(self):
+        """Test adding vectors fails when any vector has zero norm."""
+        store = VectorStore(dimensions=3)
+        vectors_2d = np.array([[0.0, 0.0, 0.0]])
+        metadata_array = np.array([{"id": "zero"}])
+
+        with pytest.raises(ValueError, match="zero-norm"):
+            store.add_vectors(vectors_2d, metadata_array)
+
+    def test_search_raises_on_zero_norm_query(self):
+        """Test search fails when query vector has zero norm."""
+        store = VectorStore(dimensions=3)
+        vectors_2d = np.array([[1.0, 0.0, 0.0]])
+        metadata_array = np.array([{"id": "x"}])
+        store.add_vectors(vectors_2d, metadata_array)
+
+        with pytest.raises(ValueError, match="zero-norm"):
+            store.search(np.array([0.0, 0.0, 0.0]))
+
     def test_structured_metadata_complex_types(self):
         """Test structured metadata with complex field types."""
         schema = {"id": "U10", "data": "O"}  # Object type for complex data

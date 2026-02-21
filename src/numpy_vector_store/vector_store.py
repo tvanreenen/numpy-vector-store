@@ -71,6 +71,8 @@ class VectorStore:
 
         # Normalize vectors in batch
         norms = np.linalg.norm(vectors_2d, axis=1, keepdims=True)
+        if np.any(norms == 0):
+            raise ValueError("Cannot add zero-norm vectors")
         normalized_vectors = vectors_2d / norms
 
         # Add vectors directly
@@ -189,8 +191,13 @@ class VectorStore:
         Returns:
             Array of similarity scores.
         """
-        query_norm = query / np.linalg.norm(query)
+        query_magnitude = np.linalg.norm(query)
+        if query_magnitude == 0:
+            raise ValueError("Cannot search with zero-norm query vector")
+        query_norm = query / query_magnitude
         vector_norms = np.linalg.norm(vectors, axis=1, keepdims=True)
+        if np.any(vector_norms == 0):
+            raise ValueError("Store contains zero-norm vectors")
         vectors_norm = vectors / vector_norms
         return np.dot(vectors_norm, query_norm)  # type: ignore[no-any-return]
 
