@@ -61,6 +61,12 @@ class VectorStore:
             vectors_2d: 2D NumPy array of shape (n_vectors, dimensions)
             metadata_array: 1D NumPy array of metadata objects
         """
+        if vectors_2d.ndim != 2:
+            raise ValueError("vectors_2d must be a 2D NumPy array")
+
+        if metadata_array.ndim != 1:
+            raise ValueError("metadata_array must be a 1D NumPy array")
+
         if vectors_2d.shape[1] != self.dimensions:
             raise ValueError(
                 f"Vector dimensions {vectors_2d.shape[1]} doesn't match store dimensions {self.dimensions}"

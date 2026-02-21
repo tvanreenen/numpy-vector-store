@@ -44,6 +44,24 @@ class TestVectorStore:
         with pytest.raises(ValueError):
             store.add_vectors(vectors_2d, metadata_array)
 
+    def test_add_vectors_requires_2d_vectors(self):
+        """Test add_vectors rejects non-2D vector arrays."""
+        store = VectorStore(dimensions=3)
+        vectors_1d = np.array([1.0, 2.0, 3.0])
+        metadata_array = np.array([{"id": "test"}])
+
+        with pytest.raises(ValueError, match="2D"):
+            store.add_vectors(vectors_1d, metadata_array)
+
+    def test_add_vectors_requires_1d_metadata(self):
+        """Test add_vectors rejects non-1D metadata arrays."""
+        store = VectorStore(dimensions=3)
+        vectors_2d = np.array([[1.0, 2.0, 3.0]])
+        metadata_2d = np.array([[{"id": "test"}]])
+
+        with pytest.raises(ValueError, match="1D"):
+            store.add_vectors(vectors_2d, metadata_2d)
+
     def test_search(self):
         """Test vector search functionality."""
         store = VectorStore(dimensions=3)
