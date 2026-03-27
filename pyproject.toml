@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "numpy-vector-store"
-version = "0.1.0"
+dynamic = ["version"]
 description = "A fast, lightweight, and zero-setup in-memory vector store powered by NumPy"
 readme = "README.md"
 requires-python = ">=3.9"
@@ -35,6 +35,9 @@ Issues = "https://github.com/tvanreenen/numpy-vector-store/issues"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/numpy_vector_store"]
+
+[tool.hatch.version]
+path = "src/numpy_vector_store/__init__.py"
 
 [tool.ruff]
 line-length = 88
@@ -77,4 +80,3 @@ dev = [
     "pytest-cov>=4.0.0",
     "ruff>=0.13.3",
 ]
-
