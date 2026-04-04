@@ -27,8 +27,6 @@ Below are benchmark results for the module's search method to help you assess it
 
 ## Installation
 
-**⚠️ Pending submission to PyPI**
-
 ```bash
 uv add numpy-vector-store
 ```
