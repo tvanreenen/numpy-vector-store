@@ -6,15 +6,13 @@ from pathlib import Path
 import numpy as np
 import pytest
 
-from numpy_vector_store import VectorStore
+from numpy_vector_store import VectorHit, VectorStore
 
 
 def add_single_vector(store, vector, metadata=None):
-    """Helper function to add a single vector using the batch method."""
-    vector_2d = np.atleast_2d(vector)
-    metadata_array = np.array([metadata or {}])
-    store.add_vectors(vector_2d, metadata_array)
-    return len(store.vectors) - 1  # Return the index of the added vector
+    """Helper function to add a single vector."""
+    store.add(np.atleast_2d(vector), [metadata or {}])
+    return len(store) - 1
 
 
 class TestVectorStore:
@@ -25,79 +23,199 @@ class TestVectorStore:
         store = VectorStore(dimensions=3)
         assert store.dimensions == 3
         assert len(store.vectors) == 0
+        assert len(store) == 0
 
-    def test_add_single_vector(self):
-        """Test adding a single vector using the batch method."""
+    def test_init_rejects_non_positive_dimensions(self):
+        """Test VectorStore rejects invalid dimensions."""
+        with pytest.raises(ValueError, match="dimensions"):
+            VectorStore(dimensions=0)
+
+    def test_add_preferred_api(self):
+        """Test adding vectors with the preferred add API."""
+        store = VectorStore[dict[str, int]](dimensions=2)
+
+        store.add([[1.0, 0.0], [0.0, 1.0]], [{"id": 1}, {"id": 2}])
+
+        assert len(store) == 2
+        assert store.get(1)[1] == {"id": 2}
+
+    def test_add_normalizes_vectors(self):
+        """Test add normalizes vectors at insert time."""
+        store = VectorStore[dict[str, str]](dimensions=2)
+
+        store.add([[3.0, 4.0]], [{"id": "v"}])
+
+        np.testing.assert_array_almost_equal(store.vectors[0], np.array([0.6, 0.8]))
+
+    def test_add_rejects_wrong_dimension(self):
+        """Test add rejects vectors with wrong dimensions."""
         store = VectorStore(dimensions=3)
-        vector_2d = np.atleast_2d(np.array([1.0, 2.0, 3.0]))
-        metadata_array = np.array([{"id": "test"}])
 
-        store.add_vectors(vector_2d, metadata_array)
-        assert len(store.vectors) == 1
+        with pytest.raises(ValueError, match="Vector dimensions"):
+            store.add([[1.0, 2.0]], [{"id": "test"}])
 
-    def test_add_vectors_wrong_dimension(self):
-        """Test adding vectors with wrong dimension raises error."""
+    def test_add_requires_2d_vectors(self):
+        """Test add rejects non-2D vector arrays."""
         store = VectorStore(dimensions=3)
-        vectors_2d = np.array([[1.0, 2.0]])  # Wrong dimension (2 instead of 3)
-        metadata_array = np.array([{"id": "test"}])
-
-        with pytest.raises(ValueError):
-            store.add_vectors(vectors_2d, metadata_array)
-
-    def test_add_vectors_requires_2d_vectors(self):
-        """Test add_vectors rejects non-2D vector arrays."""
-        store = VectorStore(dimensions=3)
-        vectors_1d = np.array([1.0, 2.0, 3.0])
-        metadata_array = np.array([{"id": "test"}])
 
         with pytest.raises(ValueError, match="2D"):
-            store.add_vectors(vectors_1d, metadata_array)
+            store.add([1.0, 2.0, 3.0], [{"id": "test"}])
 
-    def test_add_vectors_requires_1d_metadata(self):
-        """Test add_vectors rejects non-1D metadata arrays."""
+    def test_add_requires_1d_metadata(self):
+        """Test add rejects non-1D metadata arrays."""
         store = VectorStore(dimensions=3)
-        vectors_2d = np.array([[1.0, 2.0, 3.0]])
-        metadata_2d = np.array([[{"id": "test"}]])
 
         with pytest.raises(ValueError, match="1D"):
-            store.add_vectors(vectors_2d, metadata_2d)
+            store.add([[1.0, 2.0, 3.0]], np.array([[{"id": "test"}]]))
 
-    def test_search(self):
-        """Test vector search functionality."""
+    def test_add_rejects_mismatched_lengths(self):
+        """Test add rejects mismatched vector and metadata counts."""
+        store = VectorStore(dimensions=2)
+
+        with pytest.raises(ValueError, match="Number of vectors"):
+            store.add([[1.0, 2.0], [3.0, 4.0]], [{"id": 1}])
+
+    def test_add_rejects_zero_norm_vector(self):
+        """Test add rejects zero-norm vectors."""
         store = VectorStore(dimensions=3)
 
-        # Add some test vectors
-        vectors_2d = np.array([[1.0, 0.0, 0.0], [0.0, 1.0, 0.0], [0.0, 0.0, 1.0]])
-        metadata_array = np.array(
-            [{"name": "x-axis"}, {"name": "y-axis"}, {"name": "z-axis"}]
+        with pytest.raises(ValueError, match="zero-norm"):
+            store.add([[0.0, 0.0, 0.0]], [{"id": "zero"}])
+
+    def test_cosine_search_returns_vector_hits(self):
+        """Test preferred cosine_search returns typed vector hits."""
+        store = VectorStore[dict[str, str]](dimensions=3)
+        store.add(
+            [[1.0, 0.0, 0.0], [0.0, 1.0, 0.0]],
+            [{"name": "x-axis"}, {"name": "y-axis"}],
         )
-        store.add_vectors(vectors_2d, metadata_array)
 
-        # Search for vector similar to x-axis
-        query = np.array([0.9, 0.1, 0.0])
-        results = store.search(query, top_k=2)
+        results = store.cosine_search([0.9, 0.1, 0.0], top_k=1)
 
-        assert len(results) == 2
-        assert results[0][0] == 0  # x-axis should be first
-        assert results[0][1] > 0.9  # High similarity
+        assert len(results) == 1
+        assert isinstance(results[0], VectorHit)
+        assert results[0].index == 0
+        assert results[0].metadata == {"name": "x-axis"}
+        assert results[0].value == pytest.approx(0.9938837)
 
-    def test_search_with_score_cutoff(self):
-        """Test search with similarity cutoff."""
+    def test_cosine_search_with_min_value(self):
+        """Test preferred cosine_search min_value filtering."""
+        store = VectorStore[dict[str, str]](dimensions=3)
+        store.add(
+            [[1.0, 0.0, 0.0], [0.0, 1.0, 0.0], [0.0, 0.0, 1.0]],
+            [{"name": "x-axis"}, {"name": "y-axis"}, {"name": "z-axis"}],
+        )
+
+        results = store.cosine_search([0.9, 0.1, 0.0], top_k=3, min_value=0.8)
+
+        assert len(results) == 1
+        assert results[0].index == 0
+        assert results[0].metadata == {"name": "x-axis"}
+
+    def test_cosine_search_with_python_prefiltered_rows(self):
+        """Test within_rows accepts indexes built from Python metadata filtering."""
+        store = VectorStore[dict[str, object]](dimensions=3)
+        store.add(
+            [[1.0, 0.0, 0.0], [0.9, 0.1, 0.0], [0.0, 1.0, 0.0]],
+            [
+                {"product": "A", "title": "intro"},
+                {"product": "B", "title": "setup"},
+                {"product": "A", "title": "guide"},
+            ],
+        )
+        rows = [
+            i for i, metadata in enumerate(store.metadata) if metadata["product"] == "A"
+        ]
+
+        results = store.cosine_search([1.0, 0.0, 0.0], within_rows=rows)
+
+        assert [hit.index for hit in results] == [0, 2]
+
+    def test_cosine_search_with_numpy_prefiltered_rows(self):
+        """Test within_rows accepts indexes produced from NumPy metadata masks."""
+        store = VectorStore[int](dimensions=3)
+        metadata_table = np.array(
+            [("intro", "A", 2024), ("setup", "B", 2024), ("guide", "A", 2023)],
+            dtype=[("title", "U20"), ("product", "U10"), ("year", "i4")],
+        )
+        store.add(
+            [[1.0, 0.0, 0.0], [0.9, 0.1, 0.0], [0.0, 1.0, 0.0]],
+            np.arange(len(metadata_table)),
+        )
+        rows = np.flatnonzero(
+            (metadata_table["product"] == "A") & (metadata_table["year"] >= 2024)
+        )
+
+        results = store.cosine_search([1.0, 0.0, 0.0], within_rows=rows)
+
+        assert len(results) == 1
+        assert results[0].index == 0
+        assert metadata_table[results[0].metadata]["title"] == "intro"
+
+    def test_cosine_search_empty_within_rows(self):
+        """Test within_rows can restrict search to an empty row set."""
+        store = VectorStore[dict[str, str]](dimensions=3)
+        store.add([[1.0, 0.0, 0.0]], [{"id": "x"}])
+
+        assert store.cosine_search([1.0, 0.0, 0.0], within_rows=[]) == []
+
+    def test_cosine_search_rejects_invalid_within_rows(self):
+        """Test within_rows validates shape, dtype, and bounds."""
+        store = VectorStore[dict[str, str]](dimensions=3)
+        store.add([[1.0, 0.0, 0.0]], [{"id": "x"}])
+
+        with pytest.raises(ValueError, match="1D"):
+            store.cosine_search([1.0, 0.0, 0.0], within_rows=[[0]])
+
+        with pytest.raises(ValueError, match="integer"):
+            store.cosine_search([1.0, 0.0, 0.0], within_rows=[0.0])
+
+        with pytest.raises(IndexError, match="outside"):
+            store.cosine_search([1.0, 0.0, 0.0], within_rows=[1])
+
+    def test_cosine_search_rejects_wrong_query_dimensions(self):
+        """Test cosine_search rejects wrong query dimensions."""
         store = VectorStore(dimensions=3)
 
-        # Add some test vectors
-        add_single_vector(store, np.array([1.0, 0.0, 0.0]), {"name": "x-axis"})
-        add_single_vector(store, np.array([0.0, 1.0, 0.0]), {"name": "y-axis"})
-        add_single_vector(store, np.array([0.0, 0.0, 1.0]), {"name": "z-axis"})
+        with pytest.raises(ValueError, match="Query vector dimension"):
+            store.cosine_search([1.0, 2.0])
 
-        # Search with high cutoff (should return fewer results)
-        query = np.array([0.9, 0.1, 0.0])
-        results = store.search(query, top_k=3, score_cutoff=0.8)
+    def test_cosine_search_rejects_non_positive_top_k(self):
+        """Test cosine_search rejects non-positive top_k values."""
+        store = VectorStore(dimensions=3)
+        store.add([[1.0, 0.0, 0.0]], [{"id": "x"}])
 
-        # Should only return x-axis (high similarity)
-        assert len(results) == 1
-        assert results[0][0] == 0  # x-axis
-        assert results[0][1] > 0.8  # High similarity
+        with pytest.raises(ValueError, match="top_k"):
+            store.cosine_search([1.0, 0.0, 0.0], top_k=0)
+
+        with pytest.raises(ValueError, match="top_k"):
+            store.cosine_search([1.0, 0.0, 0.0], top_k=-1)
+
+    def test_cosine_search_empty_store(self):
+        """Test cosine_search on an empty store."""
+        store = VectorStore(dimensions=3)
+
+        assert store.cosine_search([1.0, 2.0, 3.0]) == []
+
+    def test_cosine_search_rejects_zero_norm_query(self):
+        """Test cosine_search rejects zero-norm query vectors."""
+        store = VectorStore(dimensions=3)
+        store.add([[1.0, 0.0, 0.0]], [{"id": "x"}])
+
+        with pytest.raises(ValueError, match="zero-norm"):
+            store.cosine_search([0.0, 0.0, 0.0])
+
+    def test_cosine_search_no_valid_results(self):
+        """Test cosine_search when no results meet min_value."""
+        store = VectorStore(dimensions=3)
+        store.add(
+            [[1.0, 0.0, 0.0], [0.0, 1.0, 0.0]],
+            [{"name": "x-axis"}, {"name": "y-axis"}],
+        )
+
+        results = store.cosine_search([0.1, 0.1, 0.1], min_value=0.9)
+
+        assert results == []
 
     def test_get(self):
         """Test retrieving vector and metadata by index."""
@@ -106,57 +224,25 @@ class TestVectorStore:
         metadata = {"test": "data"}
         add_single_vector(store, vector, metadata)
 
-        # Test successful retrieval
         entry = store.get(0)
+
         assert entry is not None
         retrieved_vector, retrieved_metadata = entry
         np.testing.assert_array_almost_equal(
             retrieved_vector, vector / np.linalg.norm(vector)
         )
         assert retrieved_metadata == metadata
-
-        # Test out of bounds
         assert store.get(1) is None
 
     def test_clear(self):
         """Test clearing the store."""
         store = VectorStore(dimensions=2)
         add_single_vector(store, np.array([1.0, 2.0]))
-        assert len(store.vectors) == 1
 
         store.clear()
+
         assert len(store.vectors) == 0
-
-    def test_add_vectors(self):
-        """Test adding multiple vectors in batch."""
-        store = VectorStore(dimensions=2)
-
-        # Prepare vectors as 2D NumPy array (most efficient)
-        vectors_2d = np.array([[1.0, 2.0], [3.0, 4.0], [5.0, 6.0]])
-
-        # Prepare metadata as NumPy array
-        metadata_array = np.array([{"id": 1}, {"id": 2}, {"id": 3}])
-
-        store.add_vectors(vectors_2d, metadata_array)
-        assert len(store.vectors) == 3
-        assert store.get(0)[1] == {"id": 1}
-
-    def test_add_multiple_vectors_wrong_dimension(self):
-        """Test adding multiple vectors with wrong dimension raises error."""
-        store = VectorStore(dimensions=3)
-
-        # Wrong dimension vectors (all have 2 dimensions instead of 3)
-        vectors_2d = np.array(
-            [
-                [1.0, 2.0],  # Wrong dimension (2 instead of 3)
-                [3.0, 4.0],  # Wrong dimension (2 instead of 3)
-            ]
-        )
-
-        metadata_array = np.array([{"id": 1}, {"id": 2}])
-
-        with pytest.raises(ValueError):
-            store.add_vectors(vectors_2d, metadata_array)
+        assert len(store.metadata) == 0
 
     def test_save_and_load(self):
         """Test saving and loading vectors."""
@@ -164,39 +250,70 @@ class TestVectorStore:
             file_path = tmp.name
 
         try:
-            # Create store with file path
             store1 = VectorStore(dimensions=2, file_path=file_path)
             add_single_vector(store1, np.array([1.0, 2.0]), {"id": "test"})
             store1.save()
 
-            # Create new store and explicitly load
             store2 = VectorStore(dimensions=2, file_path=file_path)
             store2.load()
 
             assert len(store2.vectors) == 1
             assert store2.get(0)[1] == {"id": "test"}
-
         finally:
             Path(file_path).unlink(missing_ok=True)
 
-    def test_explicit_load(self):
+    def test_save_writes_minimal_persistence_contract(self):
+        """Test saves contain only vectors and metadata arrays."""
+        with tempfile.NamedTemporaryFile(suffix=".npz", delete=False) as tmp:
+            file_path = tmp.name
+
+        try:
+            store = VectorStore[dict[str, str]](dimensions=2, file_path=file_path)
+            store.add([[1.0, 2.0]], [{"id": "test"}])
+            store.save()
+
+            with np.load(file_path, allow_pickle=True) as data:
+                assert set(data.files) == {"vectors", "metadata"}
+                assert data["vectors"].dtype == np.float32
+                assert data["metadata"][0] == {"id": "test"}
+        finally:
+            Path(file_path).unlink(missing_ok=True)
+
+    def test_load_supports_minimal_format(self):
+        """Test files with vectors and metadata load."""
+        with tempfile.NamedTemporaryFile(suffix=".npz", delete=False) as tmp:
+            file_path = tmp.name
+
+        try:
+            np.savez_compressed(
+                file_path,
+                vectors=np.array([[1.0, 0.0]], dtype=np.float32),
+                metadata=np.array([{"id": "legacy"}], dtype=object),
+            )
+
+            store = VectorStore[dict[str, str]](dimensions=2, file_path=file_path)
+            store.load()
+
+            assert len(store) == 1
+            assert store.get(0)[1] == {"id": "legacy"}
+        finally:
+            Path(file_path).unlink(missing_ok=True)
+
+    def test_explicit_load_when_file_exists(self):
         """Test explicit loading when file exists."""
         with tempfile.NamedTemporaryFile(suffix=".npz", delete=False) as tmp:
             file_path = tmp.name
 
         try:
-            # Create and save vectors
             store1 = VectorStore(dimensions=2, file_path=file_path)
             add_single_vector(store1, np.array([1.0, 2.0]), {"id": "explicit_test"})
             store1.save()
 
-            # Create new store and explicitly load
             store2 = VectorStore(dimensions=2, file_path=file_path)
             store2.load()
 
             assert len(store2.vectors) == 1
             assert store2.get(0)[1] == {"id": "explicit_test"}
-
         finally:
             Path(file_path).unlink(missing_ok=True)
 
@@ -206,143 +323,21 @@ class TestVectorStore:
             file_path = tmp.name
 
         try:
-            # Test context manager with file path
             with VectorStore(dimensions=2, file_path=file_path) as store:
                 add_single_vector(store, np.array([1.0, 2.0]), {"id": "context_test"})
-                # Should auto-save on exit
 
-            # Verify the file was saved
-            assert Path(file_path).exists()
-
-            # Load and verify content (explicit load)
             store2 = VectorStore(dimensions=2, file_path=file_path)
             store2.load()
             assert len(store2.vectors) == 1
             assert store2.get(0)[1] == {"id": "context_test"}
-
         finally:
             Path(file_path).unlink(missing_ok=True)
 
     def test_context_manager_no_file(self):
-        """Test context manager without file path (no auto-save)."""
+        """Test context manager without file path."""
         with VectorStore(dimensions=2) as store:
             add_single_vector(store, np.array([1.0, 2.0]), {"id": "no_file_test"})
             assert len(store.vectors) == 1
-        # Should not crash, just no auto-save
-
-    def test_structured_metadata_schema(self):
-        """Test VectorStore with structured metadata schema."""
-        schema = {"id": "U10", "score": "f4", "active": "?"}
-        store = VectorStore(dimensions=2, metadata_schema=schema)
-
-        assert store._use_structured is True
-        assert store._metadata_schema == schema
-        assert store.metadata.dtype.names == ("id", "score", "active")
-
-    def test_structured_metadata_add_vectors(self):
-        """Test adding vectors with structured metadata."""
-        schema = {"id": "U10", "score": "f4"}
-        store = VectorStore(dimensions=2, metadata_schema=schema)
-
-        vectors_2d = np.array([[1.0, 2.0], [3.0, 4.0]])
-        metadata_array = np.array(
-            [("test1", 0.8), ("test2", 0.9)], dtype=[("id", "U10"), ("score", "f4")]
-        )
-
-        store.add_vectors(vectors_2d, metadata_array)
-        assert len(store.vectors) == 2
-        assert store.metadata.dtype.names == ("id", "score")
-
-    def test_structured_metadata_get(self):
-        """Test getting vectors with structured metadata."""
-        schema = {"id": "U10", "score": "f4"}
-        store = VectorStore(dimensions=2, metadata_schema=schema)
-
-        vectors_2d = np.array([[1.0, 2.0]])
-        metadata_array = np.array(
-            [("test1", 0.8)], dtype=[("id", "U10"), ("score", "f4")]
-        )
-        store.add_vectors(vectors_2d, metadata_array)
-
-        vector, metadata = store.get(0)
-        assert metadata == {"id": "test1", "score": 0.8}
-
-    def test_structured_metadata_clear(self):
-        """Test clearing store with structured metadata."""
-        schema = {"id": "U10", "score": "f4"}
-        store = VectorStore(dimensions=2, metadata_schema=schema)
-
-        vectors_2d = np.array([[1.0, 2.0]])
-        metadata_array = np.array(
-            [("test1", 0.8)], dtype=[("id", "U10"), ("score", "f4")]
-        )
-        store.add_vectors(vectors_2d, metadata_array)
-
-        store.clear()
-        assert len(store.vectors) == 0
-        assert store.metadata.dtype.names == ("id", "score")
-
-    def test_structured_metadata_save_and_load(self):
-        """Test structured metadata survives save/load round-trip."""
-        with tempfile.NamedTemporaryFile(suffix=".npz", delete=False) as tmp:
-            file_path = tmp.name
-
-        try:
-            schema = {"id": "U10", "score": "f4"}
-
-            store1 = VectorStore(
-                dimensions=2, file_path=file_path, metadata_schema=schema
-            )
-            vectors_2d = np.array([[1.0, 2.0]])
-            metadata_array = np.array(
-                [("test1", 0.8)], dtype=[("id", "U10"), ("score", "f4")]
-            )
-            store1.add_vectors(vectors_2d, metadata_array)
-            store1.save()
-
-            store2 = VectorStore(
-                dimensions=2, file_path=file_path, metadata_schema=schema
-            )
-            store2.load()
-
-            assert store2.metadata.dtype.names == ("id", "score")
-            entry = store2.get(0)
-            assert entry is not None
-            _, metadata = entry
-            assert metadata["id"] == "test1"
-            assert metadata["score"] == pytest.approx(0.8)
-        finally:
-            Path(file_path).unlink(missing_ok=True)
-
-    def test_search_wrong_dimensions(self):
-        """Test search with wrong query dimensions."""
-        store = VectorStore(dimensions=3)
-        query = np.array([1.0, 2.0])  # Wrong dimension (2 instead of 3)
-
-        with pytest.raises(ValueError, match="Query vector dimension"):
-            store.search(query)
-
-    def test_search_raises_on_non_positive_top_k(self):
-        """Test search rejects non-positive top_k values."""
-        store = VectorStore(dimensions=3)
-        vectors_2d = np.array([[1.0, 0.0, 0.0]])
-        metadata_array = np.array([{"id": "x"}])
-        store.add_vectors(vectors_2d, metadata_array)
-        query = np.array([1.0, 0.0, 0.0])
-
-        with pytest.raises(ValueError, match="top_k"):
-            store.search(query, top_k=0)
-
-        with pytest.raises(ValueError, match="top_k"):
-            store.search(query, top_k=-1)
-
-    def test_search_empty_store(self):
-        """Test search on empty store."""
-        store = VectorStore(dimensions=3)
-        query = np.array([1.0, 2.0, 3.0])
-
-        results = store.search(query)
-        assert results == []
 
     def test_load_file_not_exists(self):
         """Test loading when file doesn't exist."""
@@ -350,11 +345,11 @@ class TestVectorStore:
             file_path = tmp.name
 
         try:
-            # Delete the file so it doesn't exist
             Path(file_path).unlink()
 
             store = VectorStore(dimensions=2, file_path=file_path)
-            store.load()  # Should not crash
+            store.load()
+
             assert len(store.vectors) == 0
         finally:
             Path(file_path).unlink(missing_ok=True)
@@ -365,20 +360,15 @@ class TestVectorStore:
             file_path = tmp.name
 
         try:
-            # Create and save vectors
             store1 = VectorStore(dimensions=2, file_path=file_path)
             add_single_vector(store1, np.array([1.0, 2.0]), {"id": "test"})
             store1.save()
 
-            # Load once
             store2 = VectorStore(dimensions=2, file_path=file_path)
             store2.load()
-            assert len(store2.vectors) == 1
-
-            # Load again (should not reload)
             store2.load()
-            assert len(store2.vectors) == 1
 
+            assert len(store2.vectors) == 1
         finally:
             Path(file_path).unlink(missing_ok=True)
 
@@ -418,24 +408,54 @@ class TestVectorStore:
         finally:
             Path(file_path).unlink(missing_ok=True)
 
-    def test_load_raises_on_structured_metadata_schema_mismatch(self):
-        """Test load fails fast when structured metadata schema differs."""
+    def test_load_raises_on_missing_required_arrays(self):
+        """Test load fails fast when required persisted arrays are absent."""
+        with tempfile.NamedTemporaryFile(suffix=".npz", delete=False) as tmp:
+            file_path = tmp.name
+
+        try:
+            np.savez_compressed(file_path, vectors=np.empty((0, 2), dtype=np.float32))
+
+            store = VectorStore(dimensions=2, file_path=file_path)
+            with pytest.raises(ValueError, match="metadata"):
+                store.load()
+        finally:
+            Path(file_path).unlink(missing_ok=True)
+
+    def test_load_normalizes_non_zero_vectors(self):
+        """Test load normalizes valid vectors once before storing them."""
         with tempfile.NamedTemporaryFile(suffix=".npz", delete=False) as tmp:
             file_path = tmp.name
 
         try:
             np.savez_compressed(
                 file_path,
-                vectors=np.array([[1.0, 2.0]], dtype=np.float32),
-                metadata=np.array([("test1", 0.8)], dtype=[("id", "U10"), ("score", "f4")]),
+                vectors=np.array([[2.0, 0.0]], dtype=np.float32),
+                metadata=np.array([{"id": "test"}], dtype=object),
             )
 
-            store = VectorStore(
-                dimensions=2,
-                file_path=file_path,
-                metadata_schema={"id": "U10", "active": "?"},
+            store = VectorStore(dimensions=2, file_path=file_path)
+            store.load()
+
+            np.testing.assert_array_almost_equal(store.vectors[0], np.array([1.0, 0.0]))
+            assert store.cosine_search([1.0, 0.0])[0].value == pytest.approx(1.0)
+        finally:
+            Path(file_path).unlink(missing_ok=True)
+
+    def test_load_raises_on_zero_norm_vectors(self):
+        """Test load rejects persisted zero-norm vectors."""
+        with tempfile.NamedTemporaryFile(suffix=".npz", delete=False) as tmp:
+            file_path = tmp.name
+
+        try:
+            np.savez_compressed(
+                file_path,
+                vectors=np.array([[0.0, 0.0]], dtype=np.float32),
+                metadata=np.array([{"id": "zero"}], dtype=object),
             )
-            with pytest.raises(ValueError, match="metadata schema"):
+
+            store = VectorStore(dimensions=2, file_path=file_path)
+            with pytest.raises(ValueError, match="zero-norm"):
                 store.load()
         finally:
             Path(file_path).unlink(missing_ok=True)
@@ -445,7 +465,6 @@ class TestVectorStore:
         store = VectorStore(dimensions=2)
         add_single_vector(store, np.array([1.0, 2.0]), {"id": "test"})
 
-        # Should not crash
         store.save()
 
     def test_save_empty_vectors(self):
@@ -455,7 +474,7 @@ class TestVectorStore:
 
         try:
             store = VectorStore(dimensions=2, file_path=file_path)
-            store.save()  # Should not crash with empty vectors
+            store.save()
         finally:
             Path(file_path).unlink(missing_ok=True)
 
@@ -479,71 +498,56 @@ class TestVectorStore:
         finally:
             Path(file_path).unlink(missing_ok=True)
 
-    def test_add_vectors_mismatched_lengths(self):
-        """Test adding vectors with mismatched vector and metadata lengths."""
+    def test_add_vectors_deprecated_compatibility_api(self):
+        """Test deprecated add_vectors remains compatible temporarily."""
         store = VectorStore(dimensions=2)
-        vectors_2d = np.array([[1.0, 2.0], [3.0, 4.0]])  # 2 vectors
-        metadata_array = np.array([{"id": 1}])  # 1 metadata item
+        vectors_2d = np.array([[1.0, 2.0], [3.0, 4.0]])
+        metadata_array = np.array([{"id": 1}, {"id": 2}])
 
-        with pytest.raises(ValueError, match="Number of vectors must match"):
+        with pytest.deprecated_call(match="add_vectors"):
             store.add_vectors(vectors_2d, metadata_array)
 
-    def test_add_vectors_raises_on_zero_norm_vector(self):
-        """Test adding vectors fails when any vector has zero norm."""
+        assert len(store) == 2
+        assert store.get(0)[1] == {"id": 1}
+
+    def test_add_vectors_deprecated_validation(self):
+        """Test deprecated add_vectors still preserves validation."""
+        store = VectorStore(dimensions=2)
+
+        with pytest.raises(ValueError, match="2D"):
+            with pytest.deprecated_call(match="add_vectors"):
+                store.add_vectors(np.array([1.0, 2.0]), np.array([{"id": 1}]))
+
+        with pytest.raises(ValueError, match="1D"):
+            with pytest.deprecated_call(match="add_vectors"):
+                store.add_vectors(np.array([[1.0, 2.0]]), np.array([[{"id": 1}]]))
+
+    def test_search_deprecated_compatibility_api(self):
+        """Test deprecated search remains compatible temporarily."""
         store = VectorStore(dimensions=3)
-        vectors_2d = np.array([[0.0, 0.0, 0.0]])
-        metadata_array = np.array([{"id": "zero"}])
-
-        with pytest.raises(ValueError, match="zero-norm"):
-            store.add_vectors(vectors_2d, metadata_array)
-
-    def test_search_raises_on_zero_norm_query(self):
-        """Test search fails when query vector has zero norm."""
-        store = VectorStore(dimensions=3)
-        vectors_2d = np.array([[1.0, 0.0, 0.0]])
-        metadata_array = np.array([{"id": "x"}])
-        store.add_vectors(vectors_2d, metadata_array)
-
-        with pytest.raises(ValueError, match="zero-norm"):
-            store.search(np.array([0.0, 0.0, 0.0]))
-
-    def test_structured_metadata_complex_types(self):
-        """Test structured metadata with complex field types."""
-        schema = {"id": "U10", "data": "O"}  # Object type for complex data
-        store = VectorStore(dimensions=2, metadata_schema=schema)
-
-        vectors_2d = np.array([[1.0, 2.0]])
-        metadata_array = np.array(
-            [("test1", {"nested": "data"})], dtype=[("id", "U10"), ("data", "O")]
+        store.add(
+            [[1.0, 0.0, 0.0], [0.0, 1.0, 0.0]],
+            [{"name": "x-axis"}, {"name": "y-axis"}],
         )
 
-        store.add_vectors(vectors_2d, metadata_array)
-        assert len(store.vectors) == 1
+        with pytest.deprecated_call(match="search"):
+            results = store.search(np.array([0.9, 0.1, 0.0]), top_k=2)
 
-    def test_search_no_valid_results(self):
-        """Test search when no results meet the score cutoff."""
+        assert len(results) == 2
+        assert results[0][0] == 0
+        assert results[0][1] > 0.9
+        assert results[0][2] == {"name": "x-axis"}
+
+    def test_search_deprecated_score_cutoff(self):
+        """Test deprecated search still supports score_cutoff."""
         store = VectorStore(dimensions=3)
-
-        # Add vectors
-        vectors_2d = np.array([[1.0, 0.0, 0.0], [0.0, 1.0, 0.0]])
-        metadata_array = np.array([{"name": "x-axis"}, {"name": "y-axis"}])
-        store.add_vectors(vectors_2d, metadata_array)
-
-        # Search with very high cutoff (no results should match)
-        query = np.array([0.1, 0.1, 0.1])
-        results = store.search(query, score_cutoff=0.9)
-
-        assert results == []
-
-    def test_structured_metadata_non_string_type(self):
-        """Test structured metadata with non-string field type."""
-        schema = {"id": "U10", "data": dict}  # Non-string type
-        store = VectorStore(dimensions=2, metadata_schema=schema)
-
-        vectors_2d = np.array([[1.0, 2.0]])
-        metadata_array = np.array(
-            [("test1", {"nested": "data"})], dtype=[("id", "U10"), ("data", "O")]
+        store.add(
+            [[1.0, 0.0, 0.0], [0.0, 1.0, 0.0]],
+            [{"name": "x-axis"}, {"name": "y-axis"}],
         )
 
-        store.add_vectors(vectors_2d, metadata_array)
-        assert len(store.vectors) == 1
+        with pytest.deprecated_call(match="search"):
+            results = store.search(np.array([0.9, 0.1, 0.0]), score_cutoff=0.8)
+
+        assert len(results) == 1
+        assert results[0][0] == 0

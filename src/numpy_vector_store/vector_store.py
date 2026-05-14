@@ -1,129 +1,135 @@
+from __future__ import annotations
+
+import warnings
+from collections.abc import Sequence
+from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Optional
+from typing import Any, Generic, TypeVar
 
 import numpy as np
+import numpy.typing as npt
+
+TMetadata = TypeVar("TMetadata")
 
 
-class VectorStore:
+@dataclass(frozen=True, slots=True)
+class VectorHit(Generic[TMetadata]):
+    """A typed vector-search result."""
+
+    index: int
+    value: float
+    metadata: TMetadata
+
+
+class VectorStore(Generic[TMetadata]):
     """
-    A simple vector store implementation using NumPy.
+    A small in-memory vector store using NumPy cosine similarity.
 
-    This class provides basic functionality for storing and searching
-    vector embeddings using cosine similarity.
+    Metadata is an opaque row payload returned with vector hits. The store does
+    not implement a metadata query language; pass row indexes to within_rows for
+    prefiltered similarity search.
     """
 
     def __init__(
         self,
         dimensions: int,
-        file_path: Optional[str] = None,
-        metadata_schema: Optional[dict] = None,
-    ):
+        file_path: str | Path | None = None,
+    ) -> None:
         """
         Initialize the vector store.
 
         Args:
             dimensions: The number of dimensions for vectors to be stored.
             file_path: Optional path to save/load vectors from.
-            metadata_schema: Optional schema for structured metadata operations.
         """
+        if dimensions <= 0:
+            raise ValueError("dimensions must be greater than 0")
+
         self.dimensions = dimensions
         self.file_path = Path(file_path) if file_path else None
-        # Initialize as empty 2D array with correct dimensions
-        self.vectors: np.ndarray = np.array([]).reshape(0, dimensions)
+        self.vectors: npt.NDArray[np.float32] = np.empty(
+            (0, dimensions), dtype=np.float32
+        )
         self._loaded = False
+        self.metadata: npt.NDArray[Any] = np.array([], dtype=object)
 
-        if metadata_schema:
-            # Use structured NumPy array for performance
-            self.metadata = np.array([], dtype=self._create_dtype(metadata_schema))
-            self._use_structured = True
-            self._metadata_schema: Optional[dict] = metadata_schema
-        else:
-            # Use object array for flexibility (still NumPy)
-            self.metadata = np.array([], dtype=object)
-            self._use_structured = False
-            self._metadata_schema = None
-
-    def _create_dtype(self, schema: dict) -> list:
-        """Convert schema dict to NumPy dtype."""
-        dtype = []
-        for field, field_type in schema.items():
-            if isinstance(field_type, str):
-                dtype.append((field, field_type))
-            else:
-                dtype.append((field, "O"))  # Object type for complex data
-        return dtype
-
-    def add_vectors(self, vectors_2d: np.ndarray, metadata_array: np.ndarray) -> None:
+    def add(
+        self, vectors: npt.ArrayLike, metadata: Sequence[TMetadata] | npt.NDArray[Any]
+    ) -> None:
         """
-        Add vectors and metadata directly as NumPy arrays (most efficient).
+        Add vectors and row metadata payloads.
 
-        Args:
-            vectors_2d: 2D NumPy array of shape (n_vectors, dimensions)
-            metadata_array: 1D NumPy array of metadata objects
+        Vectors are normalized at insert time. Metadata items are stored as
+        opaque payloads and returned with vector hits.
         """
+        vectors_2d = np.asarray(vectors, dtype=np.float32)
         if vectors_2d.ndim != 2:
-            raise ValueError("vectors_2d must be a 2D NumPy array")
-
-        if metadata_array.ndim != 1:
-            raise ValueError("metadata_array must be a 1D NumPy array")
+            raise ValueError("vectors must be a 2D array")
 
         if vectors_2d.shape[1] != self.dimensions:
             raise ValueError(
                 f"Vector dimensions {vectors_2d.shape[1]} doesn't match store dimensions {self.dimensions}"
             )
 
+        metadata_array = self._metadata_to_array(metadata)
+        if metadata_array.ndim != 1:
+            raise ValueError("metadata must be a 1D sequence")
+
         if len(vectors_2d) != len(metadata_array):
             raise ValueError("Number of vectors must match number of metadata items")
 
-        # Normalize vectors in batch
-        norms = np.linalg.norm(vectors_2d, axis=1, keepdims=True)
-        if np.any(norms == 0):
-            raise ValueError("Cannot add zero-norm vectors")
-        normalized_vectors = vectors_2d / norms
+        normalized_vectors = self._normalize_vectors(
+            vectors_2d,
+            error_message="Cannot add zero-norm vectors",
+        )
 
-        # Add vectors directly
         if len(self.vectors) == 0:
             self.vectors = normalized_vectors
         else:
-            self.vectors = np.vstack([self.vectors, normalized_vectors])
+            self.vectors = np.vstack([self.vectors, normalized_vectors]).astype(
+                np.float32, copy=False
+            )
 
-        # Add metadata directly
         self.metadata = np.append(self.metadata, metadata_array)
 
+    def add_vectors(self, vectors_2d: np.ndarray, metadata_array: np.ndarray) -> None:
+        """
+        Deprecated API for adding vectors and metadata arrays.
+
+        Use add(...) instead.
+        """
+        warnings.warn(
+            "VectorStore.add_vectors() is deprecated and will be removed in a future 0.x release. "
+            "Use VectorStore.add() instead.",
+            DeprecationWarning,
+            stacklevel=2,
+        )
+        if vectors_2d.ndim != 2:
+            raise ValueError("vectors_2d must be a 2D NumPy array")
+
+        if metadata_array.ndim != 1:
+            raise ValueError("metadata_array must be a 1D NumPy array")
+
+        self.add(vectors_2d, metadata_array.tolist())
+
     def load(self) -> None:
-        """
-        Load vectors from file if file_path is specified.
-        """
+        """Load vectors from file if file_path is specified and exists."""
         if self._loaded or not self.file_path:
             return
 
         if self.file_path.exists():
-            data = np.load(self.file_path, allow_pickle=True)
-            loaded_vectors = data["vectors"]
-            loaded_metadata = data["metadata"]
-            data.close()
+            with np.load(self.file_path, allow_pickle=True) as data:
+                files = set(data.files)
+                self._validate_required_fields(files)
 
-            if loaded_vectors.ndim != 2:
-                raise ValueError("Loaded vectors must be a 2D array")
+                loaded_vectors = np.asarray(data["vectors"], dtype=np.float32)
+                loaded_metadata = np.array(data["metadata"], copy=True)
 
-            if loaded_vectors.shape[1] != self.dimensions:
-                raise ValueError(
-                    f"Loaded vector dimension {loaded_vectors.shape[1]} doesn't match store dimensions {self.dimensions}"
-                )
-
-            if len(loaded_vectors) != len(loaded_metadata):
-                raise ValueError("Loaded vectors and metadata length mismatch")
-
-            if self._use_structured and self._metadata_schema is not None:
-                expected_fields = tuple(self._metadata_schema.keys())
-                loaded_fields = loaded_metadata.dtype.names
-                if loaded_fields != expected_fields:
-                    raise ValueError(
-                        f"Loaded metadata schema {loaded_fields} doesn't match expected schema {expected_fields}"
-                    )
-                loaded_metadata = loaded_metadata.astype(
-                    np.dtype(self._create_dtype(self._metadata_schema)), copy=False
-                )
+            self._validate_loaded_arrays(loaded_vectors, loaded_metadata)
+            loaded_vectors = self._normalize_vectors(
+                loaded_vectors,
+                error_message="Loaded vectors contain zero-norm vectors",
+            )
 
             self.vectors = loaded_vectors
             self.metadata = loaded_metadata
@@ -131,36 +137,34 @@ class VectorStore:
         self._loaded = True
 
     def save(self) -> None:
-        """
-        Save vectors to file if file_path is specified.
-        """
+        """Save vectors and metadata if file_path is specified."""
         if not self.file_path:
             return
 
-        vectors_array: np.ndarray = self.vectors.astype(np.float32)
-        # Preserve metadata dtype so structured arrays remain structured
-        # after save/load round-trips.
-        metadata_array = np.array(self.metadata, copy=True)
-        np.savez_compressed(self.file_path, vectors=vectors_array, metadata=metadata_array)
+        np.savez_compressed(
+            self.file_path,
+            vectors=self.vectors.astype(np.float32, copy=False),
+            metadata=np.array(self.metadata, copy=True),
+        )
 
-    def search(
-        self, query_vector: np.ndarray, top_k: int = 10, score_cutoff: float = 0.0
-    ) -> list[tuple[int, float, dict]]:
+    def cosine_search(
+        self,
+        query: npt.ArrayLike,
+        *,
+        top_k: int = 10,
+        min_value: float | None = None,
+        within_rows: Sequence[int] | npt.NDArray[np.integer[Any]] | None = None,
+    ) -> list[VectorHit[TMetadata]]:
         """
-        Search for the most similar vectors.
+        Return the most similar rows using cosine similarity.
 
         Args:
-            query_vector: The query vector to search with.
-            top_k: Number of top results to return.
-            score_cutoff: Minimum similarity score to include in results.
-
-        Returns:
-            List of tuples containing (index, similarity_score, metadata).
+            query: 1D query vector.
+            top_k: Maximum number of hits to return.
+            min_value: Optional minimum cosine similarity value.
+            within_rows: Optional row indexes to restrict search to.
         """
-        if len(query_vector) != self.dimensions:
-            raise ValueError(
-                f"Query vector dimension {len(query_vector)} doesn't match store dimensions {self.dimensions}"
-            )
+        query_vector = self._validate_query(query)
 
         if top_k <= 0:
             raise ValueError("top_k must be greater than 0")
@@ -168,82 +172,93 @@ class VectorStore:
         if len(self.vectors) == 0:
             return []
 
-        # Use efficient cosine similarity computation
-        similarities = self._cosine_similarity_numpy(query_vector, self.vectors)
-
-        # Filter by similarity cutoff first
-        valid_indices = np.where(similarities >= score_cutoff)[0]
-        if len(valid_indices) == 0:
+        row_indices = self._normalize_within_rows(within_rows)
+        if len(row_indices) == 0:
             return []
 
-        # Get top_k results from valid indices
-        valid_similarities = similarities[valid_indices]
-        top_valid_indices = np.argsort(valid_similarities)[::-1][:top_k]
-        top_indices = valid_indices[top_valid_indices]
+        similarities = self._cosine_similarity_numpy(
+            query_vector, self.vectors[row_indices]
+        )
 
-        results = []
-        for idx in top_indices:
-            results.append((int(idx), float(similarities[idx]), self.metadata[idx]))
+        if min_value is not None:
+            valid_local_indices = np.flatnonzero(similarities >= min_value)
+        else:
+            valid_local_indices = np.arange(len(similarities))
 
-        return results
+        if len(valid_local_indices) == 0:
+            return []
+
+        valid_similarities = similarities[valid_local_indices]
+        result_count = min(top_k, len(valid_local_indices))
+        if result_count < len(valid_local_indices):
+            top_local_unsorted = np.argpartition(valid_similarities, -result_count)[
+                -result_count:
+            ]
+        else:
+            top_local_unsorted = np.arange(len(valid_similarities))
+
+        top_local_sorted = top_local_unsorted[
+            np.argsort(valid_similarities[top_local_unsorted])[::-1]
+        ]
+        local_indices = valid_local_indices[top_local_sorted]
+        original_indices = row_indices[local_indices]
+
+        return [
+            VectorHit(
+                index=int(original_idx),
+                value=float(similarities[local_idx]),
+                metadata=self.metadata[original_idx],
+            )
+            for local_idx, original_idx in zip(
+                local_indices, original_indices, strict=True
+            )
+        ]
+
+    def search(
+        self, query_vector: np.ndarray, top_k: int = 10, score_cutoff: float = 0.0
+    ) -> list[tuple[int, float, TMetadata]]:
+        """
+        Deprecated tuple-returning similarity search.
+
+        Use cosine_search(...), which returns VectorHit objects and uses
+        min_value instead.
+        """
+        warnings.warn(
+            "VectorStore.search() is deprecated and will be removed in a future 0.x release. "
+            "Use VectorStore.cosine_search() instead.",
+            DeprecationWarning,
+            stacklevel=2,
+        )
+        hits = self.cosine_search(query_vector, top_k=top_k, min_value=score_cutoff)
+        return [(hit.index, hit.value, hit.metadata) for hit in hits]
 
     def _cosine_similarity_numpy(
-        self, query: np.ndarray, vectors: np.ndarray
-    ) -> np.ndarray:
-        """
-        Efficient cosine similarity computation using NumPy.
-
-        Args:
-            query: Query vector.
-            vectors: Array of vectors to compare against.
-
-        Returns:
-            Array of similarity scores.
-        """
+        self, query: npt.NDArray[np.float32], vectors: npt.NDArray[np.float32]
+    ) -> npt.NDArray[np.float32]:
+        """Compute cosine similarity against normalized vectors."""
         query_magnitude = np.linalg.norm(query)
         if query_magnitude == 0:
             raise ValueError("Cannot search with zero-norm query vector")
         query_norm = query / query_magnitude
-        vector_norms = np.linalg.norm(vectors, axis=1, keepdims=True)
-        if np.any(vector_norms == 0):
-            raise ValueError("Store contains zero-norm vectors")
-        vectors_norm = vectors / vector_norms
-        return np.dot(vectors_norm, query_norm)  # type: ignore[no-any-return]
+        similarities = np.asarray(np.dot(vectors, query_norm), dtype=np.float32)
+        return similarities
 
-    def get(self, index: int) -> Optional[tuple[np.ndarray, dict]]:
-        """
-        Get vector and metadata by index.
-
-        Args:
-            index: The index of the vector to retrieve.
-
-        Returns:
-            Tuple of (vector, metadata) or None if index is out of bounds.
-        """
+    def get(self, index: int) -> tuple[npt.NDArray[np.float32], TMetadata] | None:
+        """Get a normalized vector and metadata payload by row index."""
         if 0 <= index < len(self.vectors):
-            if self._use_structured and self._metadata_schema is not None:
-                # Convert structured array row to dict
-                metadata_row = self.metadata[index]
-                metadata_dict = {
-                    field: metadata_row[field] for field in self._metadata_schema.keys()
-                }
-                return (self.vectors[index], metadata_dict)
-            else:
-                # Object array - return the dict directly
-                return (self.vectors[index], self.metadata[index])
+            return (self.vectors[index], self.metadata[index])
         return None
 
     def clear(self) -> None:
         """Clear all vectors and metadata from the store."""
-        self.vectors = np.array([]).reshape(0, self.dimensions)
-        if self._use_structured and self._metadata_schema is not None:
-            self.metadata = np.array(
-                [], dtype=self._create_dtype(self._metadata_schema)
-            )
-        else:
-            self.metadata = np.array([], dtype=object)
+        self.vectors = np.empty((0, self.dimensions), dtype=np.float32)
+        self.metadata = np.array([], dtype=object)
 
-    def __enter__(self) -> "VectorStore":
+    def __len__(self) -> int:
+        """Return the number of stored vector rows."""
+        return len(self.vectors)
+
+    def __enter__(self) -> VectorStore[TMetadata]:
         """Enter the context manager."""
         return self
 
@@ -251,3 +266,70 @@ class VectorStore:
         """Exit the context manager, auto-save if file_path is specified."""
         if self.file_path:
             self.save()
+
+    def _metadata_to_array(
+        self, metadata: Sequence[TMetadata] | npt.NDArray[Any]
+    ) -> npt.NDArray[Any]:
+        return np.asarray(metadata, dtype=object)
+
+    def _normalize_vectors(
+        self, vectors: npt.NDArray[np.float32], *, error_message: str
+    ) -> npt.NDArray[np.float32]:
+        norms = np.linalg.norm(vectors, axis=1, keepdims=True)
+        if np.any(norms == 0):
+            raise ValueError(error_message)
+        return np.asarray(vectors / norms, dtype=np.float32)
+
+    def _validate_query(self, query: npt.ArrayLike) -> npt.NDArray[np.float32]:
+        query_vector = np.asarray(query, dtype=np.float32)
+        if query_vector.ndim != 1:
+            raise ValueError("Query vector must be a 1D array")
+        if len(query_vector) != self.dimensions:
+            raise ValueError(
+                f"Query vector dimension {len(query_vector)} doesn't match store dimensions {self.dimensions}"
+            )
+        return query_vector
+
+    def _normalize_within_rows(
+        self, within_rows: Sequence[int] | npt.NDArray[np.integer[Any]] | None
+    ) -> npt.NDArray[np.intp]:
+        if within_rows is None:
+            return np.arange(len(self.vectors), dtype=np.intp)
+
+        rows = np.asarray(within_rows)
+        if rows.ndim != 1:
+            raise ValueError("within_rows must be a 1D sequence of row indexes")
+        if len(rows) == 0:
+            return np.array([], dtype=np.intp)
+        if not np.issubdtype(rows.dtype, np.integer):
+            raise ValueError("within_rows must contain integer row indexes")
+
+        rows = rows.astype(np.intp, copy=False)
+        if np.any(rows < 0) or np.any(rows >= len(self.vectors)):
+            raise IndexError("within_rows contains row indexes outside the store")
+        return rows
+
+    def _validate_required_fields(self, files: set[str]) -> None:
+        if "vectors" not in files:
+            raise ValueError("Persisted vector store is missing vectors")
+        if "metadata" not in files:
+            raise ValueError("Persisted vector store is missing metadata")
+
+    def _validate_loaded_arrays(
+        self,
+        loaded_vectors: npt.NDArray[np.float32],
+        loaded_metadata: npt.NDArray[Any],
+    ) -> None:
+        if loaded_vectors.ndim != 2:
+            raise ValueError("Loaded vectors must be a 2D array")
+
+        if loaded_vectors.shape[1] != self.dimensions:
+            raise ValueError(
+                f"Loaded vector dimension {loaded_vectors.shape[1]} doesn't match store dimensions {self.dimensions}"
+            )
+
+        if loaded_metadata.ndim != 1:
+            raise ValueError("Loaded metadata must be a 1D array")
+
+        if len(loaded_vectors) != len(loaded_metadata):
+            raise ValueError("Loaded vectors and metadata length mismatch")

@@ -5,9 +5,9 @@ This package provides a lightweight vector store implementation for storing
 and searching vector embeddings using NumPy arrays.
 """
 
-__version__ = "0.1.0"
+__version__ = "0.2.0"
 __author__ = "Tim VanReenen"
 
-from .vector_store import VectorStore
+from .vector_store import VectorHit, VectorStore
 
-__all__ = ["VectorStore"]
+__all__ = ["VectorHit", "VectorStore"]
