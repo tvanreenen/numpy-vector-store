@@ -1,7 +1,6 @@
 from __future__ import annotations
 
-import warnings
-from collections.abc import Sequence
+from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Generic, TypeVar
@@ -23,17 +22,19 @@ class VectorHit(Generic[TMetadata]):
 
 class VectorStore(Generic[TMetadata]):
     """
-    A small in-memory vector store using NumPy cosine similarity.
+    A small in-memory vector store using NumPy exact vector search.
 
     Metadata is an opaque row payload returned with vector hits. The store does
     not implement a metadata query language; pass row indexes to within_rows for
-    prefiltered similarity search.
+    prefiltered vector search.
     """
 
     def __init__(
         self,
         dimensions: int,
         file_path: str | Path | None = None,
+        *,
+        normalize: bool = True,
     ) -> None:
         """
         Initialize the vector store.
@@ -41,12 +42,14 @@ class VectorStore(Generic[TMetadata]):
         Args:
             dimensions: The number of dimensions for vectors to be stored.
             file_path: Optional path to save/load vectors from.
+            normalize: Whether to store vectors normalized to unit length.
         """
         if dimensions <= 0:
             raise ValueError("dimensions must be greater than 0")
 
         self.dimensions = dimensions
         self.file_path = Path(file_path) if file_path else None
+        self.normalize = normalize
         self.vectors: npt.NDArray[np.float32] = np.empty(
             (0, dimensions), dtype=np.float32
         )
@@ -59,8 +62,8 @@ class VectorStore(Generic[TMetadata]):
         """
         Add vectors and row metadata payloads.
 
-        Vectors are normalized at insert time. Metadata items are stored as
-        opaque payloads and returned with vector hits.
+        When normalize=True, vectors are normalized at insert time. Metadata
+        items are stored as opaque payloads and returned with vector hits.
         """
         vectors_2d = np.asarray(vectors, dtype=np.float32)
         if vectors_2d.ndim != 2:
@@ -78,39 +81,19 @@ class VectorStore(Generic[TMetadata]):
         if len(vectors_2d) != len(metadata_array):
             raise ValueError("Number of vectors must match number of metadata items")
 
-        normalized_vectors = self._normalize_vectors(
+        vectors_to_store = self._prepare_vectors_for_storage(
             vectors_2d,
             error_message="Cannot add zero-norm vectors",
         )
 
         if len(self.vectors) == 0:
-            self.vectors = normalized_vectors
+            self.vectors = vectors_to_store
         else:
-            self.vectors = np.vstack([self.vectors, normalized_vectors]).astype(
+            self.vectors = np.vstack([self.vectors, vectors_to_store]).astype(
                 np.float32, copy=False
             )
 
         self.metadata = np.append(self.metadata, metadata_array)
-
-    def add_vectors(self, vectors_2d: np.ndarray, metadata_array: np.ndarray) -> None:
-        """
-        Deprecated API for adding vectors and metadata arrays.
-
-        Use add(...) instead.
-        """
-        warnings.warn(
-            "VectorStore.add_vectors() is deprecated and will be removed in a future 0.x release. "
-            "Use VectorStore.add() instead.",
-            DeprecationWarning,
-            stacklevel=2,
-        )
-        if vectors_2d.ndim != 2:
-            raise ValueError("vectors_2d must be a 2D NumPy array")
-
-        if metadata_array.ndim != 1:
-            raise ValueError("metadata_array must be a 1D NumPy array")
-
-        self.add(vectors_2d, metadata_array.tolist())
 
     def load(self) -> None:
         """Load vectors from file if file_path is specified and exists."""
@@ -126,7 +109,7 @@ class VectorStore(Generic[TMetadata]):
                 loaded_metadata = np.array(data["metadata"], copy=True)
 
             self._validate_loaded_arrays(loaded_vectors, loaded_metadata)
-            loaded_vectors = self._normalize_vectors(
+            loaded_vectors = self._prepare_vectors_for_storage(
                 loaded_vectors,
                 error_message="Loaded vectors contain zero-norm vectors",
             )
@@ -164,87 +147,98 @@ class VectorStore(Generic[TMetadata]):
             min_value: Optional minimum cosine similarity value.
             within_rows: Optional row indexes to restrict search to.
         """
-        query_vector = self._validate_query(query)
-
-        if top_k <= 0:
-            raise ValueError("top_k must be greater than 0")
-
-        if len(self.vectors) == 0:
-            return []
-
-        row_indices = self._normalize_within_rows(within_rows)
-        if len(row_indices) == 0:
-            return []
-
-        similarities = self._cosine_similarity_numpy(
-            query_vector, self.vectors[row_indices]
+        return self._metric_search(
+            query,
+            top_k=top_k,
+            within_rows=within_rows,
+            values_fn=self._cosine_values,
+            descending=True,
+            min_value=min_value,
+            max_value=None,
         )
 
-        if min_value is not None:
-            valid_local_indices = np.flatnonzero(similarities >= min_value)
-        else:
-            valid_local_indices = np.arange(len(similarities))
-
-        if len(valid_local_indices) == 0:
-            return []
-
-        valid_similarities = similarities[valid_local_indices]
-        result_count = min(top_k, len(valid_local_indices))
-        if result_count < len(valid_local_indices):
-            top_local_unsorted = np.argpartition(valid_similarities, -result_count)[
-                -result_count:
-            ]
-        else:
-            top_local_unsorted = np.arange(len(valid_similarities))
-
-        top_local_sorted = top_local_unsorted[
-            np.argsort(valid_similarities[top_local_unsorted])[::-1]
-        ]
-        local_indices = valid_local_indices[top_local_sorted]
-        original_indices = row_indices[local_indices]
-
-        return [
-            VectorHit(
-                index=int(original_idx),
-                value=float(similarities[local_idx]),
-                metadata=self.metadata[original_idx],
-            )
-            for local_idx, original_idx in zip(
-                local_indices, original_indices, strict=True
-            )
-        ]
-
-    def search(
-        self, query_vector: np.ndarray, top_k: int = 10, score_cutoff: float = 0.0
-    ) -> list[tuple[int, float, TMetadata]]:
+    def dot_search(
+        self,
+        query: npt.ArrayLike,
+        *,
+        top_k: int = 10,
+        min_value: float | None = None,
+        within_rows: Sequence[int] | npt.NDArray[np.integer[Any]] | None = None,
+    ) -> list[VectorHit[TMetadata]]:
         """
-        Deprecated tuple-returning similarity search.
+        Return rows ranked by dot product.
 
-        Use cosine_search(...), which returns VectorHit objects and uses
-        min_value instead.
+        With normalize=True, this is the dot product of unit vectors. With
+        normalize=False, this is the true dot product over original vectors.
         """
-        warnings.warn(
-            "VectorStore.search() is deprecated and will be removed in a future 0.x release. "
-            "Use VectorStore.cosine_search() instead.",
-            DeprecationWarning,
-            stacklevel=2,
+        return self._metric_search(
+            query,
+            top_k=top_k,
+            within_rows=within_rows,
+            values_fn=self._dot_values,
+            descending=True,
+            min_value=min_value,
+            max_value=None,
         )
-        hits = self.cosine_search(query_vector, top_k=top_k, min_value=score_cutoff)
-        return [(hit.index, hit.value, hit.metadata) for hit in hits]
 
-    def _cosine_similarity_numpy(
+    def euclidean_search(
+        self,
+        query: npt.ArrayLike,
+        *,
+        top_k: int = 10,
+        max_value: float | None = None,
+        within_rows: Sequence[int] | npt.NDArray[np.integer[Any]] | None = None,
+    ) -> list[VectorHit[TMetadata]]:
+        """
+        Return rows ranked by Euclidean distance.
+
+        With normalize=True, this is distance between normalized directions.
+        With normalize=False, this is true Euclidean distance over original
+        vectors.
+        """
+        return self._metric_search(
+            query,
+            top_k=top_k,
+            within_rows=within_rows,
+            values_fn=self._euclidean_values,
+            descending=False,
+            min_value=None,
+            max_value=max_value,
+        )
+
+    def _cosine_values(
         self, query: npt.NDArray[np.float32], vectors: npt.NDArray[np.float32]
     ) -> npt.NDArray[np.float32]:
-        """Compute cosine similarity against normalized vectors."""
-        query_magnitude = np.linalg.norm(query)
-        if query_magnitude == 0:
-            raise ValueError("Cannot search with zero-norm query vector")
-        query_norm = query / query_magnitude
-        similarities = np.asarray(np.dot(vectors, query_norm), dtype=np.float32)
-        return similarities
+        """Compute cosine similarity values."""
+        query_norm = self._normalize_query(query)
+        values = np.dot(vectors, query_norm)
+
+        if not self.normalize:
+            vector_norms = np.linalg.norm(vectors, axis=1)
+            if np.any(vector_norms == 0):
+                raise ValueError("Cannot cosine search zero-norm stored vectors")
+            values = values / vector_norms
+
+        return np.asarray(values, dtype=np.float32)
+
+    def _dot_values(
+        self, query: npt.NDArray[np.float32], vectors: npt.NDArray[np.float32]
+    ) -> npt.NDArray[np.float32]:
+        """Compute dot product values."""
+        if self.normalize:
+            query = self._normalize_query(query)
+        return np.asarray(np.dot(vectors, query), dtype=np.float32)
+
+    def _euclidean_values(
+        self, query: npt.NDArray[np.float32], vectors: npt.NDArray[np.float32]
+    ) -> npt.NDArray[np.float32]:
+        """Compute Euclidean distance values."""
+        if self.normalize:
+            query = self._normalize_query(query)
+        return np.asarray(np.linalg.norm(vectors - query, axis=1), dtype=np.float32)
 
     def get(self, index: int) -> tuple[npt.NDArray[np.float32], TMetadata] | None:
-        """Get a normalized vector and metadata payload by row index."""
+        """Get a stored vector and metadata payload by row index."""
         if 0 <= index < len(self.vectors):
             return (self.vectors[index], self.metadata[index])
         return None
@@ -272,13 +266,21 @@ class VectorStore(Generic[TMetadata]):
     ) -> npt.NDArray[Any]:
         return np.asarray(metadata, dtype=object)
 
-    def _normalize_vectors(
+    def _prepare_vectors_for_storage(
         self, vectors: npt.NDArray[np.float32], *, error_message: str
     ) -> npt.NDArray[np.float32]:
-        norms = np.linalg.norm(vectors, axis=1, keepdims=True)
+        norms = self._validate_non_zero_vectors(vectors, error_message=error_message)
+        if self.normalize:
+            return np.asarray(vectors / norms[:, np.newaxis], dtype=np.float32)
+        return vectors.astype(np.float32, copy=True)
+
+    def _validate_non_zero_vectors(
+        self, vectors: npt.NDArray[np.float32], *, error_message: str
+    ) -> npt.NDArray[np.float32]:
+        norms = np.linalg.norm(vectors, axis=1)
         if np.any(norms == 0):
             raise ValueError(error_message)
-        return np.asarray(vectors / norms, dtype=np.float32)
+        return np.asarray(norms, dtype=np.float32)
 
     def _validate_query(self, query: npt.ArrayLike) -> npt.NDArray[np.float32]:
         query_vector = np.asarray(query, dtype=np.float32)
@@ -289,6 +291,14 @@ class VectorStore(Generic[TMetadata]):
                 f"Query vector dimension {len(query_vector)} doesn't match store dimensions {self.dimensions}"
             )
         return query_vector
+
+    def _normalize_query(
+        self, query: npt.NDArray[np.float32]
+    ) -> npt.NDArray[np.float32]:
+        query_magnitude = np.linalg.norm(query)
+        if query_magnitude == 0:
+            raise ValueError("Cannot search with zero-norm query vector")
+        return np.asarray(query / query_magnitude, dtype=np.float32)
 
     def _normalize_within_rows(
         self, within_rows: Sequence[int] | npt.NDArray[np.integer[Any]] | None
@@ -308,6 +318,80 @@ class VectorStore(Generic[TMetadata]):
         if np.any(rows < 0) or np.any(rows >= len(self.vectors)):
             raise IndexError("within_rows contains row indexes outside the store")
         return rows
+
+    def _metric_search(
+        self,
+        query: npt.ArrayLike,
+        *,
+        top_k: int,
+        within_rows: Sequence[int] | npt.NDArray[np.integer[Any]] | None,
+        values_fn: Callable[
+            [npt.NDArray[np.float32], npt.NDArray[np.float32]],
+            npt.NDArray[np.float32],
+        ],
+        descending: bool,
+        min_value: float | None,
+        max_value: float | None,
+    ) -> list[VectorHit[TMetadata]]:
+        query_vector = self._validate_query(query)
+
+        if top_k <= 0:
+            raise ValueError("top_k must be greater than 0")
+
+        if len(self.vectors) == 0:
+            return []
+
+        row_indices = self._normalize_within_rows(within_rows)
+        if len(row_indices) == 0:
+            return []
+
+        values = values_fn(query_vector, self.vectors[row_indices])
+
+        valid_local_indices = np.arange(len(values))
+        if min_value is not None:
+            valid_local_indices = valid_local_indices[
+                values[valid_local_indices] >= min_value
+            ]
+        if max_value is not None:
+            valid_local_indices = valid_local_indices[
+                values[valid_local_indices] <= max_value
+            ]
+
+        if len(valid_local_indices) == 0:
+            return []
+
+        valid_values = values[valid_local_indices]
+        result_count = min(top_k, len(valid_local_indices))
+        if result_count < len(valid_local_indices):
+            if descending:
+                top_valid_unsorted = np.argpartition(valid_values, -result_count)[
+                    -result_count:
+                ]
+            else:
+                top_valid_unsorted = np.argpartition(valid_values, result_count - 1)[
+                    :result_count
+                ]
+        else:
+            top_valid_unsorted = np.arange(len(valid_values))
+
+        sort_order = np.argsort(valid_values[top_valid_unsorted])
+        if descending:
+            sort_order = sort_order[::-1]
+
+        top_valid_sorted = top_valid_unsorted[sort_order]
+        local_indices = valid_local_indices[top_valid_sorted]
+        original_indices = row_indices[local_indices]
+
+        return [
+            VectorHit(
+                index=int(original_idx),
+                value=float(values[local_idx]),
+                metadata=self.metadata[original_idx],
+            )
+            for local_idx, original_idx in zip(
+                local_indices, original_indices, strict=True
+            )
+        ]
 
     def _validate_required_fields(self, files: set[str]) -> None:
         if "vectors" not in files:
