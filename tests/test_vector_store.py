@@ -22,8 +22,15 @@ class TestVectorStore:
         """Test VectorStore initialization."""
         store = VectorStore(dimensions=3)
         assert store.dimensions == 3
+        assert store.normalize is True
         assert len(store.vectors) == 0
         assert len(store) == 0
+
+    def test_init_allows_raw_vector_storage(self):
+        """Test VectorStore can preserve raw vectors."""
+        store = VectorStore(dimensions=3, normalize=False)
+
+        assert store.normalize is False
 
     def test_init_rejects_non_positive_dimensions(self):
         """Test VectorStore rejects invalid dimensions."""
@@ -46,6 +53,15 @@ class TestVectorStore:
         store.add([[3.0, 4.0]], [{"id": "v"}])
 
         np.testing.assert_array_almost_equal(store.vectors[0], np.array([0.6, 0.8]))
+
+    def test_add_preserves_raw_vectors_when_normalize_false(self):
+        """Test add preserves original vectors when normalize=False."""
+        store = VectorStore[dict[str, str]](dimensions=2, normalize=False)
+
+        store.add([[3.0, 4.0]], [{"id": "v"}])
+
+        np.testing.assert_array_equal(store.vectors[0], np.array([3.0, 4.0]))
+        np.testing.assert_array_equal(store.get(0)[0], np.array([3.0, 4.0]))
 
     def test_add_rejects_wrong_dimension(self):
         """Test add rejects vectors with wrong dimensions."""
@@ -78,6 +94,13 @@ class TestVectorStore:
     def test_add_rejects_zero_norm_vector(self):
         """Test add rejects zero-norm vectors."""
         store = VectorStore(dimensions=3)
+
+        with pytest.raises(ValueError, match="zero-norm"):
+            store.add([[0.0, 0.0, 0.0]], [{"id": "zero"}])
+
+    def test_add_rejects_zero_norm_vector_when_normalize_false(self):
+        """Test add rejects zero vectors because cosine search is always available."""
+        store = VectorStore(dimensions=3, normalize=False)
 
         with pytest.raises(ValueError, match="zero-norm"):
             store.add([[0.0, 0.0, 0.0]], [{"id": "zero"}])
@@ -216,6 +239,116 @@ class TestVectorStore:
         results = store.cosine_search([0.1, 0.1, 0.1], min_value=0.9)
 
         assert results == []
+
+    def test_cosine_search_with_raw_vectors(self):
+        """Test cosine_search computes true cosine when normalize=False."""
+        store = VectorStore[dict[str, str]](dimensions=2, normalize=False)
+        store.add(
+            [[10.0, 0.0], [0.0, 2.0], [3.0, 4.0]],
+            [{"id": "x"}, {"id": "y"}, {"id": "diag"}],
+        )
+
+        results = store.cosine_search([1.0, 0.0], top_k=3)
+
+        assert [hit.index for hit in results] == [0, 2, 1]
+        assert [hit.value for hit in results] == pytest.approx([1.0, 0.6, 0.0])
+
+    def test_dot_search_with_raw_vectors(self):
+        """Test dot_search ranks by true dot product when normalize=False."""
+        store = VectorStore[dict[str, str]](dimensions=2, normalize=False)
+        store.add(
+            [[10.0, 0.0], [0.0, 2.0], [3.0, 4.0]],
+            [{"id": "x"}, {"id": "y"}, {"id": "diag"}],
+        )
+
+        results = store.dot_search([1.0, 0.0], top_k=3)
+
+        assert all(isinstance(hit, VectorHit) for hit in results)
+        assert [hit.index for hit in results] == [0, 2, 1]
+        assert [hit.value for hit in results] == pytest.approx([10.0, 3.0, 0.0])
+
+    def test_dot_search_with_normalized_vectors(self):
+        """Test dot_search uses stored unit vectors when normalize=True."""
+        store = VectorStore[dict[str, str]](dimensions=2)
+        store.add(
+            [[10.0, 0.0], [3.0, 4.0], [0.0, 2.0]],
+            [{"id": "x"}, {"id": "diag"}, {"id": "y"}],
+        )
+
+        results = store.dot_search([2.0, 0.0], top_k=3, min_value=0.5)
+
+        assert [hit.index for hit in results] == [0, 1]
+        assert [hit.value for hit in results] == pytest.approx([1.0, 0.6])
+
+    def test_euclidean_search_with_raw_vectors(self):
+        """Test euclidean_search ranks by nearest raw vector when normalize=False."""
+        store = VectorStore[dict[str, str]](dimensions=2, normalize=False)
+        store.add(
+            [[1.0, 1.0], [4.0, 5.0], [2.0, 1.0]],
+            [{"id": "near"}, {"id": "far"}, {"id": "also-near"}],
+        )
+
+        results = store.euclidean_search([1.0, 2.0], top_k=3)
+
+        assert all(isinstance(hit, VectorHit) for hit in results)
+        assert [hit.index for hit in results] == [0, 2, 1]
+        assert [hit.value for hit in results] == pytest.approx(
+            [1.0, np.sqrt(2.0), np.sqrt(18.0)]
+        )
+
+    def test_euclidean_search_with_max_value(self):
+        """Test euclidean_search max_value filters by distance."""
+        store = VectorStore[dict[str, str]](dimensions=2, normalize=False)
+        store.add(
+            [[1.0, 1.0], [4.0, 5.0], [2.0, 1.0]],
+            [{"id": "near"}, {"id": "far"}, {"id": "also-near"}],
+        )
+
+        results = store.euclidean_search([1.0, 2.0], top_k=3, max_value=1.5)
+
+        assert [hit.index for hit in results] == [0, 2]
+
+    def test_euclidean_search_with_normalized_vectors(self):
+        """Test euclidean_search uses normalized stored vectors by default."""
+        store = VectorStore[dict[str, str]](dimensions=2)
+        store.add(
+            [[10.0, 0.0], [3.0, 4.0]],
+            [{"id": "x"}, {"id": "diag"}],
+        )
+
+        results = store.euclidean_search([2.0, 0.0], top_k=2)
+
+        assert [hit.index for hit in results] == [0, 1]
+        assert [hit.value for hit in results] == pytest.approx([0.0, np.sqrt(0.8)])
+
+    def test_metric_searches_support_within_rows(self):
+        """Test dot and Euclidean search support prefiltered row indexes."""
+        store = VectorStore[dict[str, str]](dimensions=2, normalize=False)
+        store.add(
+            [[10.0, 0.0], [0.0, 2.0], [3.0, 4.0]],
+            [{"id": "x"}, {"id": "y"}, {"id": "diag"}],
+        )
+
+        dot_results = store.dot_search([1.0, 0.0], within_rows=[1, 2])
+        euclidean_results = store.euclidean_search([1.0, 0.0], within_rows=[1, 2])
+
+        assert [hit.index for hit in dot_results] == [2, 1]
+        assert [hit.index for hit in euclidean_results] == [1, 2]
+
+    def test_metric_searches_validate_common_inputs(self):
+        """Test added search methods share common validation behavior."""
+        store = VectorStore(dimensions=2)
+        store.add([[1.0, 0.0]], [{"id": "x"}])
+
+        with pytest.raises(ValueError, match="top_k"):
+            store.dot_search([1.0, 0.0], top_k=0)
+
+        with pytest.raises(ValueError, match="Query vector dimension"):
+            store.euclidean_search([1.0])
+
+        assert store.dot_search([1.0, 0.0], within_rows=[]) == []
+        with pytest.raises(IndexError, match="outside"):
+            store.euclidean_search([1.0, 0.0], within_rows=[1])
 
     def test_get(self):
         """Test retrieving vector and metadata by index."""
@@ -442,6 +575,27 @@ class TestVectorStore:
         finally:
             Path(file_path).unlink(missing_ok=True)
 
+    def test_load_preserves_raw_vectors_when_normalize_false(self):
+        """Test load preserves valid vectors when normalize=False."""
+        with tempfile.NamedTemporaryFile(suffix=".npz", delete=False) as tmp:
+            file_path = tmp.name
+
+        try:
+            np.savez_compressed(
+                file_path,
+                vectors=np.array([[2.0, 0.0]], dtype=np.float32),
+                metadata=np.array([{"id": "test"}], dtype=object),
+            )
+
+            store = VectorStore(dimensions=2, file_path=file_path, normalize=False)
+            store.load()
+
+            np.testing.assert_array_equal(store.vectors[0], np.array([2.0, 0.0]))
+            assert store.cosine_search([1.0, 0.0])[0].value == pytest.approx(1.0)
+            assert store.dot_search([1.0, 0.0])[0].value == pytest.approx(2.0)
+        finally:
+            Path(file_path).unlink(missing_ok=True)
+
     def test_load_raises_on_zero_norm_vectors(self):
         """Test load rejects persisted zero-norm vectors."""
         with tempfile.NamedTemporaryFile(suffix=".npz", delete=False) as tmp:
@@ -455,6 +609,24 @@ class TestVectorStore:
             )
 
             store = VectorStore(dimensions=2, file_path=file_path)
+            with pytest.raises(ValueError, match="zero-norm"):
+                store.load()
+        finally:
+            Path(file_path).unlink(missing_ok=True)
+
+    def test_load_raises_on_zero_norm_vectors_when_normalize_false(self):
+        """Test raw stores reject zero rows because cosine search is always available."""
+        with tempfile.NamedTemporaryFile(suffix=".npz", delete=False) as tmp:
+            file_path = tmp.name
+
+        try:
+            np.savez_compressed(
+                file_path,
+                vectors=np.array([[0.0, 0.0]], dtype=np.float32),
+                metadata=np.array([{"id": "zero"}], dtype=object),
+            )
+
+            store = VectorStore(dimensions=2, file_path=file_path, normalize=False)
             with pytest.raises(ValueError, match="zero-norm"):
                 store.load()
         finally:
@@ -495,6 +667,28 @@ class TestVectorStore:
             store2.load()
             assert len(store2.vectors) == 0
             assert len(store2.metadata) == 0
+        finally:
+            Path(file_path).unlink(missing_ok=True)
+
+    def test_save_and_load_raw_vectors_round_trip(self):
+        """Test normalize=False saves and loads raw vectors without mode metadata."""
+        with tempfile.NamedTemporaryFile(suffix=".npz", delete=False) as tmp:
+            file_path = tmp.name
+
+        try:
+            store1 = VectorStore(dimensions=2, file_path=file_path, normalize=False)
+            store1.add([[3.0, 4.0]], [{"id": "raw"}])
+            store1.save()
+
+            with np.load(file_path, allow_pickle=True) as data:
+                assert set(data.files) == {"vectors", "metadata"}
+                np.testing.assert_array_equal(data["vectors"][0], np.array([3.0, 4.0]))
+
+            store2 = VectorStore(dimensions=2, file_path=file_path, normalize=False)
+            store2.load()
+
+            np.testing.assert_array_equal(store2.get(0)[0], np.array([3.0, 4.0]))
+            assert store2.get(0)[1] == {"id": "raw"}
         finally:
             Path(file_path).unlink(missing_ok=True)
 
