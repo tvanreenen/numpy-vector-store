@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import warnings
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 from pathlib import Path
@@ -95,26 +94,6 @@ class VectorStore(Generic[TMetadata]):
             )
 
         self.metadata = np.append(self.metadata, metadata_array)
-
-    def add_vectors(self, vectors_2d: np.ndarray, metadata_array: np.ndarray) -> None:
-        """
-        Deprecated API for adding vectors and metadata arrays.
-
-        Use add(...) instead.
-        """
-        warnings.warn(
-            "VectorStore.add_vectors() is deprecated and will be removed in a future 0.x release. "
-            "Use VectorStore.add() instead.",
-            DeprecationWarning,
-            stacklevel=2,
-        )
-        if vectors_2d.ndim != 2:
-            raise ValueError("vectors_2d must be a 2D NumPy array")
-
-        if metadata_array.ndim != 1:
-            raise ValueError("metadata_array must be a 1D NumPy array")
-
-        self.add(vectors_2d, metadata_array.tolist())
 
     def load(self) -> None:
         """Load vectors from file if file_path is specified and exists."""
@@ -226,24 +205,6 @@ class VectorStore(Generic[TMetadata]):
             min_value=None,
             max_value=max_value,
         )
-
-    def search(
-        self, query_vector: np.ndarray, top_k: int = 10, score_cutoff: float = 0.0
-    ) -> list[tuple[int, float, TMetadata]]:
-        """
-        Deprecated tuple-returning similarity search.
-
-        Use cosine_search(...), which returns VectorHit objects and uses
-        min_value instead.
-        """
-        warnings.warn(
-            "VectorStore.search() is deprecated and will be removed in a future 0.x release. "
-            "Use VectorStore.cosine_search() instead.",
-            DeprecationWarning,
-            stacklevel=2,
-        )
-        hits = self.cosine_search(query_vector, top_k=top_k, min_value=score_cutoff)
-        return [(hit.index, hit.value, hit.metadata) for hit in hits]
 
     def _cosine_values(
         self, query: npt.NDArray[np.float32], vectors: npt.NDArray[np.float32]
