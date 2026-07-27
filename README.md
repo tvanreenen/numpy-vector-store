@@ -213,6 +213,8 @@ not a supported security model.
 This project is still pre-1.0, so occasional breaking changes are expected while
 the API stabilizes. Breaking changes are documented in GitHub release notes.
 Deprecated APIs will keep warning for at least one point release before removal.
+See the [project roadmap](ROADMAP.md) for the planned path to stable API and
+persistence contracts.
 
 ## Contributing
 
