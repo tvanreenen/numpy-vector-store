@@ -486,6 +486,35 @@ class TestVectorStore:
 
         assert received_vectors[0] is store.vectors
 
+    @pytest.mark.parametrize(
+        "search_name", ["cosine_search", "dot_search", "euclidean_search"]
+    )
+    @pytest.mark.parametrize("normalize", [True, False])
+    def test_randomized_unfiltered_search_matches_full_row_filter(
+        self, search_name, normalize
+    ):
+        """Test optimized searches match a shuffled full-row selection."""
+        rng = np.random.default_rng(20260727)
+        vectors = rng.normal(size=(64, 8)).astype(np.float32)
+        query = rng.normal(size=8).astype(np.float32)
+        store = VectorStore[int](dimensions=8, normalize=normalize)
+        store.add(vectors, np.arange(len(vectors)))
+        shuffled_rows = rng.permutation(len(store))
+
+        search = getattr(store, search_name)
+        unfiltered_results = search(query, top_k=16)
+        filtered_results = search(query, top_k=16, within_rows=shuffled_rows)
+
+        assert [hit.index for hit in unfiltered_results] == [
+            hit.index for hit in filtered_results
+        ]
+        assert [hit.metadata for hit in filtered_results] == [
+            hit.index for hit in filtered_results
+        ]
+        assert [hit.value for hit in unfiltered_results] == pytest.approx(
+            [hit.value for hit in filtered_results]
+        )
+
     def test_metric_searches_validate_common_inputs(self):
         """Test added search methods share common validation behavior."""
         store = VectorStore(dimensions=2)

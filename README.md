@@ -152,6 +152,13 @@ rows = [
 hits = store.cosine_search(query, top_k=10, within_rows=rows)
 ```
 
+Searches without `within_rows` compute directly against the stored vector matrix
+and do not make a full copy of it. A filtered search gathers the selected rows
+into a temporary matrix, so its additional memory use scales with the number of
+selected rows and the vector dimensions. Omit `within_rows` when every row
+should be searched; passing every row explicitly would create an unnecessary
+full-size temporary matrix.
+
 For structured NumPy metadata, use NumPy to produce the row indexes:
 
 ```python
