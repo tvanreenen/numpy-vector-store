@@ -37,6 +37,9 @@ Issues = "https://github.com/tvanreenen/numpy-vector-store/issues"
 [tool.hatch.build.targets.wheel]
 packages = ["src/numpy_vector_store"]
 
+[tool.hatch.build.targets.sdist]
+exclude = ["/.codex"]
+
 [tool.hatch.version]
 path = "src/numpy_vector_store/__init__.py"
 
