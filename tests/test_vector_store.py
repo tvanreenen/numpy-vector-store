@@ -54,6 +54,22 @@ class TestVectorStore:
 
         np.testing.assert_array_almost_equal(store.vectors[0], np.array([0.6, 0.8]))
 
+    @pytest.mark.parametrize(
+        "magnitude",
+        [
+            np.float32(1e20),
+            np.nextafter(np.float32(0), np.float32(1)),
+        ],
+    )
+    def test_add_normalizes_extreme_finite_vectors(self, magnitude):
+        """Test normalization avoids float32 overflow and underflow."""
+        store = VectorStore[dict[str, str]](dimensions=2)
+
+        store.add([[magnitude, magnitude]], [{"id": "extreme"}])
+
+        expected = np.array([1 / np.sqrt(2), 1 / np.sqrt(2)])
+        np.testing.assert_allclose(store.vectors[0], expected, rtol=1e-6)
+
     def test_add_preserves_raw_vectors_when_normalize_false(self):
         """Test add preserves original vectors when normalize=False."""
         store = VectorStore[dict[str, str]](dimensions=2, normalize=False)
@@ -239,6 +255,22 @@ class TestVectorStore:
         with pytest.raises(ValueError, match="zero-norm"):
             store.cosine_search([0.0, 0.0, 0.0])
 
+    @pytest.mark.parametrize(
+        "magnitude",
+        [
+            np.float32(1e20),
+            np.nextafter(np.float32(0), np.float32(1)),
+        ],
+    )
+    def test_cosine_search_normalizes_extreme_finite_queries(self, magnitude):
+        """Test query normalization avoids float32 overflow and underflow."""
+        store = VectorStore(dimensions=2)
+        store.add([[1.0, 0.0]], [{"id": "x"}])
+
+        result = store.cosine_search([magnitude, magnitude])[0]
+
+        assert result.value == pytest.approx(1 / np.sqrt(2), rel=1e-6)
+
     def test_cosine_search_no_valid_results(self):
         """Test cosine_search when no results meet min_value."""
         store = VectorStore(dimensions=3)
@@ -263,6 +295,15 @@ class TestVectorStore:
 
         assert [hit.index for hit in results] == [0, 2, 1]
         assert [hit.value for hit in results] == pytest.approx([1.0, 0.6, 0.0])
+
+    def test_cosine_search_with_large_raw_vectors(self):
+        """Test raw cosine norms do not overflow float32."""
+        store = VectorStore[str](dimensions=2, normalize=False)
+        store.add([[1e20, 1e20]], ["large"])
+
+        result = store.cosine_search([1e20, 1e20])[0]
+
+        assert result.value == pytest.approx(1.0)
 
     def test_dot_search_with_raw_vectors(self):
         """Test dot_search ranks by true dot product when normalize=False."""

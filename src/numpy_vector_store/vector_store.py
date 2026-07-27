@@ -213,13 +213,22 @@ class VectorStore(Generic[TMetadata]):
     ) -> npt.NDArray[np.float32]:
         """Compute cosine similarity values."""
         query_norm = self._normalize_query(query)
-        values = np.dot(vectors, query_norm)
 
-        if not self.normalize:
-            vector_norms = np.linalg.norm(vectors, axis=1)
+        if self.normalize:
+            values = np.dot(vectors, query_norm)
+        else:
+            vector_norms = self._row_norms(vectors)
             if np.any(vector_norms == 0):
                 raise ValueError("Cannot cosine search zero-norm stored vectors")
-            values = values / vector_norms
+            values = (
+                np.einsum(
+                    "ij,j->i",
+                    vectors,
+                    query_norm,
+                    dtype=np.float64,
+                )
+                / vector_norms
+            )
 
         return np.asarray(values, dtype=np.float32)
 
@@ -290,14 +299,23 @@ class VectorStore(Generic[TMetadata]):
         *,
         zero_norm_error_message: str,
         non_finite_error_message: str,
-    ) -> npt.NDArray[np.float32]:
+    ) -> npt.NDArray[np.float64]:
         if not np.all(np.isfinite(vectors)):
             raise ValueError(non_finite_error_message)
 
-        norms = np.linalg.norm(vectors, axis=1)
+        norms = self._row_norms(vectors)
         if np.any(norms == 0):
             raise ValueError(zero_norm_error_message)
-        return np.asarray(norms, dtype=np.float32)
+        return norms
+
+    def _row_norms(self, vectors: npt.NDArray[np.float32]) -> npt.NDArray[np.float64]:
+        squared_norms = np.einsum(
+            "ij,ij->i",
+            vectors,
+            vectors,
+            dtype=np.float64,
+        )
+        return np.asarray(np.sqrt(squared_norms), dtype=np.float64)
 
     def _validate_query(self, query: npt.ArrayLike) -> npt.NDArray[np.float32]:
         query_vector = np.asarray(query, dtype=np.float32)
@@ -325,10 +343,13 @@ class VectorStore(Generic[TMetadata]):
     def _normalize_query(
         self, query: npt.NDArray[np.float32]
     ) -> npt.NDArray[np.float32]:
-        query_magnitude = np.linalg.norm(query)
+        query_magnitude = np.linalg.norm(query.astype(np.float64))
         if query_magnitude == 0:
             raise ValueError("Cannot search with zero-norm query vector")
-        return np.asarray(query / query_magnitude, dtype=np.float32)
+        return np.asarray(
+            query.astype(np.float64) / query_magnitude,
+            dtype=np.float32,
+        )
 
     def _normalize_within_rows(
         self, within_rows: Sequence[int] | npt.NDArray[np.integer[Any]] | None
