@@ -65,7 +65,7 @@ class VectorStore(Generic[TMetadata]):
         When normalize=True, vectors are normalized at insert time. Metadata
         items are stored as opaque payloads and returned with vector hits.
         """
-        vectors_2d = np.asarray(vectors, dtype=np.float32)
+        vectors_2d = self._to_float32_array(vectors)
         if vectors_2d.ndim != 2:
             raise ValueError("vectors must be a 2D array")
 
@@ -106,7 +106,7 @@ class VectorStore(Generic[TMetadata]):
                 files = set(data.files)
                 self._validate_required_fields(files)
 
-                loaded_vectors = np.asarray(data["vectors"], dtype=np.float32)
+                loaded_vectors = self._to_float32_array(data["vectors"])
                 loaded_metadata = np.array(data["metadata"], copy=True)
 
             self._validate_loaded_arrays(loaded_vectors, loaded_metadata)
@@ -288,6 +288,10 @@ class VectorStore(Generic[TMetadata]):
     ) -> npt.NDArray[Any]:
         return np.asarray(metadata, dtype=object)
 
+    def _to_float32_array(self, values: npt.ArrayLike) -> npt.NDArray[np.float32]:
+        with np.errstate(over="ignore", invalid="ignore"):
+            return np.asarray(values, dtype=np.float32)
+
     def _prepare_vectors_for_storage(
         self,
         vectors: npt.NDArray[np.float32],
@@ -327,7 +331,7 @@ class VectorStore(Generic[TMetadata]):
         return np.asarray(np.sqrt(squared_norms), dtype=np.float64)
 
     def _validate_query(self, query: npt.ArrayLike) -> npt.NDArray[np.float32]:
-        query_vector = np.asarray(query, dtype=np.float32)
+        query_vector = self._to_float32_array(query)
         if query_vector.ndim != 1:
             raise ValueError("Query vector must be a 1D array")
         if len(query_vector) != self.dimensions:

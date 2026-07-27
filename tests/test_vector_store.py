@@ -1,6 +1,7 @@
 """Tests for the VectorStore class."""
 
 import tempfile
+import warnings
 from pathlib import Path
 
 import numpy as np
@@ -134,6 +135,15 @@ class TestVectorStore:
 
         assert len(store) == 0
         assert len(store.metadata) == 0
+
+    def test_add_rejects_values_outside_float32_without_warning(self):
+        """Test out-of-range values produce only the validation error."""
+        store = VectorStore(dimensions=2)
+
+        with warnings.catch_warnings():
+            warnings.simplefilter("error", RuntimeWarning)
+            with pytest.raises(ValueError, match="non-finite"):
+                store.add([[1e100, 1.0]], [{"id": "out-of-range"}])
 
     def test_cosine_search_returns_vector_hits(self):
         """Test preferred cosine_search returns typed vector hits."""
@@ -452,6 +462,16 @@ class TestVectorStore:
 
         with pytest.raises(ValueError, match="finite"):
             getattr(store, search_name)([non_finite, 0.0])
+
+    def test_search_rejects_query_outside_float32_without_warning(self):
+        """Test an out-of-range query produces only the validation error."""
+        store = VectorStore(dimensions=2)
+        store.add([[1.0, 0.0]], [{"id": "x"}])
+
+        with warnings.catch_warnings():
+            warnings.simplefilter("error", RuntimeWarning)
+            with pytest.raises(ValueError, match="finite"):
+                store.cosine_search([1e100, 0.0])
 
     @pytest.mark.parametrize(
         ("search_name", "threshold_name"),
@@ -778,6 +798,26 @@ class TestVectorStore:
 
             assert len(store) == 0
             assert len(store.metadata) == 0
+        finally:
+            Path(file_path).unlink(missing_ok=True)
+
+    def test_load_rejects_values_outside_float32_without_warning(self):
+        """Test loading out-of-range values produces only the validation error."""
+        with tempfile.NamedTemporaryFile(suffix=".npz", delete=False) as tmp:
+            file_path = tmp.name
+
+        try:
+            np.savez_compressed(
+                file_path,
+                vectors=np.array([[1e100, 1.0]], dtype=np.float64),
+                metadata=np.array([{"id": "out-of-range"}], dtype=object),
+            )
+
+            store = VectorStore(dimensions=2, file_path=file_path)
+            with warnings.catch_warnings():
+                warnings.simplefilter("error", RuntimeWarning)
+                with pytest.raises(ValueError, match="non-finite"):
+                    store.load()
         finally:
             Path(file_path).unlink(missing_ok=True)
 
