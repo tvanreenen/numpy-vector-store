@@ -289,7 +289,13 @@ class VectorStore(Generic[TMetadata]):
     def _metadata_to_array(
         self, metadata: Sequence[TMetadata] | npt.NDArray[Any]
     ) -> npt.NDArray[Any]:
-        return np.asarray(metadata, dtype=object)
+        if isinstance(metadata, np.ndarray) and metadata.ndim != 1:
+            return np.asarray(metadata, dtype=object)
+
+        metadata_array = np.empty(len(metadata), dtype=object)
+        for index, payload in enumerate(metadata):
+            metadata_array[index] = payload
+        return metadata_array
 
     def _resolve_file_path(self, file_path: str | Path | None) -> Path | None:
         if not file_path:
