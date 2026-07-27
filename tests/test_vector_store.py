@@ -2,12 +2,21 @@
 
 import tempfile
 import warnings
+from dataclasses import dataclass
 from pathlib import Path
 
 import numpy as np
 import pytest
 
 from numpy_vector_store import VectorHit, VectorStore
+
+
+@dataclass
+class MetadataRecord:
+    """Structured metadata payload used by regression tests."""
+
+    identifier: int
+    label: str
 
 
 def add_single_vector(store, vector, metadata=None):
@@ -100,6 +109,25 @@ class TestVectorStore:
 
         with pytest.raises(ValueError, match="1D"):
             store.add([[1.0, 2.0, 3.0]], np.array([[{"id": "test"}]]))
+
+    @pytest.mark.parametrize(
+        "payload",
+        [
+            ("tuple", 1),
+            ["list", 2],
+            MetadataRecord(identifier=3, label="dataclass"),
+            "scalar",
+            {"id": 5},
+        ],
+    )
+    def test_add_preserves_opaque_metadata_payload(self, payload):
+        """Test structured payloads remain individual metadata rows."""
+        store = VectorStore(dimensions=2)
+
+        store.add([[1.0, 0.0]], [payload])
+
+        assert store.metadata.shape == (1,)
+        assert store.get(0)[1] == payload
 
     def test_add_rejects_mismatched_lengths(self):
         """Test add rejects mismatched vector and metadata counts."""
@@ -571,6 +599,29 @@ class TestVectorStore:
                 assert data["metadata"][0] == {"id": "test"}
         finally:
             Path(file_path).unlink(missing_ok=True)
+
+    def test_opaque_metadata_payloads_round_trip(self, tmp_path):
+        """Test each opaque payload remains one row after saving and loading."""
+        file_path = tmp_path / "vectors.npz"
+        payloads = [
+            ("tuple", 1),
+            ["list", 2],
+            MetadataRecord(identifier=3, label="dataclass"),
+            "scalar",
+            {"id": 5},
+        ]
+        store = VectorStore[object](dimensions=2, file_path=file_path)
+        store.add(
+            [[1.0, 0.0], [0.0, 1.0], [1.0, 1.0], [1.0, -1.0], [2.0, 1.0]],
+            payloads,
+        )
+        store.save()
+
+        loaded = VectorStore[object](dimensions=2, file_path=file_path)
+        loaded.load()
+
+        assert loaded.metadata.shape == (5,)
+        assert loaded.metadata.tolist() == payloads
 
     def test_load_supports_minimal_format(self):
         """Test files with vectors and metadata load."""
