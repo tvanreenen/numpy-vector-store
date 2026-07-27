@@ -4,8 +4,13 @@ on:
   workflow_dispatch:
 
 jobs:
+  validate:
+    name: Validate release candidate
+    uses: ./.github/workflows/ci.yml
+
   publish-testpypi:
     name: Publish to TestPyPI
+    needs: validate
     runs-on: ubuntu-latest
     permissions:
       contents: read
