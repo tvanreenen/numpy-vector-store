@@ -47,13 +47,13 @@ continue to test the versions selected by the project's lockfile.
 
 ## 0.3.2: Reliability and performance
 
-Status: in progress
+Status: complete
 
 This patch release focuses on cases where the current API can silently produce
 incorrect results, fail to reload data it saved, reject documented metadata
 payloads, or allocate much more memory than an exact search requires.
 
-Planned changes:
+Delivered changes:
 
 - Validate vectors and queries for finite numeric values.
 - Normalize large finite vectors without overflowing intermediate `float32`
