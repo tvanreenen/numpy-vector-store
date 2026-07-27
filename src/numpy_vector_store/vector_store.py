@@ -83,7 +83,8 @@ class VectorStore(Generic[TMetadata]):
 
         vectors_to_store = self._prepare_vectors_for_storage(
             vectors_2d,
-            error_message="Cannot add zero-norm vectors",
+            zero_norm_error_message="Cannot add zero-norm vectors",
+            non_finite_error_message="Cannot add vectors containing non-finite values",
         )
 
         if len(self.vectors) == 0:
@@ -111,7 +112,8 @@ class VectorStore(Generic[TMetadata]):
             self._validate_loaded_arrays(loaded_vectors, loaded_metadata)
             loaded_vectors = self._prepare_vectors_for_storage(
                 loaded_vectors,
-                error_message="Loaded vectors contain zero-norm vectors",
+                zero_norm_error_message="Loaded vectors contain zero-norm vectors",
+                non_finite_error_message="Loaded vectors contain non-finite values",
             )
 
             self.vectors = loaded_vectors
@@ -267,19 +269,34 @@ class VectorStore(Generic[TMetadata]):
         return np.asarray(metadata, dtype=object)
 
     def _prepare_vectors_for_storage(
-        self, vectors: npt.NDArray[np.float32], *, error_message: str
+        self,
+        vectors: npt.NDArray[np.float32],
+        *,
+        zero_norm_error_message: str,
+        non_finite_error_message: str,
     ) -> npt.NDArray[np.float32]:
-        norms = self._validate_non_zero_vectors(vectors, error_message=error_message)
+        norms = self._validate_non_zero_vectors(
+            vectors,
+            zero_norm_error_message=zero_norm_error_message,
+            non_finite_error_message=non_finite_error_message,
+        )
         if self.normalize:
             return np.asarray(vectors / norms[:, np.newaxis], dtype=np.float32)
         return vectors.astype(np.float32, copy=True)
 
     def _validate_non_zero_vectors(
-        self, vectors: npt.NDArray[np.float32], *, error_message: str
+        self,
+        vectors: npt.NDArray[np.float32],
+        *,
+        zero_norm_error_message: str,
+        non_finite_error_message: str,
     ) -> npt.NDArray[np.float32]:
+        if not np.all(np.isfinite(vectors)):
+            raise ValueError(non_finite_error_message)
+
         norms = np.linalg.norm(vectors, axis=1)
         if np.any(norms == 0):
-            raise ValueError(error_message)
+            raise ValueError(zero_norm_error_message)
         return np.asarray(norms, dtype=np.float32)
 
     def _validate_query(self, query: npt.ArrayLike) -> npt.NDArray[np.float32]:
@@ -290,7 +307,20 @@ class VectorStore(Generic[TMetadata]):
             raise ValueError(
                 f"Query vector dimension {len(query_vector)} doesn't match store dimensions {self.dimensions}"
             )
+        if not np.all(np.isfinite(query_vector)):
+            raise ValueError("Query vector must contain only finite values")
         return query_vector
+
+    def _validate_search_threshold(
+        self, value: float | None, *, name: str
+    ) -> float | None:
+        if value is None:
+            return None
+
+        value = float(value)
+        if not np.isfinite(value):
+            raise ValueError(f"{name} must be finite")
+        return value
 
     def _normalize_query(
         self, query: npt.NDArray[np.float32]
@@ -334,6 +364,8 @@ class VectorStore(Generic[TMetadata]):
         max_value: float | None,
     ) -> list[VectorHit[TMetadata]]:
         query_vector = self._validate_query(query)
+        min_value = self._validate_search_threshold(min_value, name="min_value")
+        max_value = self._validate_search_threshold(max_value, name="max_value")
 
         if top_k <= 0:
             raise ValueError("top_k must be greater than 0")

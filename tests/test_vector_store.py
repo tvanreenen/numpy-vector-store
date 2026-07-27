@@ -105,6 +105,17 @@ class TestVectorStore:
         with pytest.raises(ValueError, match="zero-norm"):
             store.add([[0.0, 0.0, 0.0]], [{"id": "zero"}])
 
+    @pytest.mark.parametrize("non_finite", [np.nan, np.inf, -np.inf])
+    def test_add_rejects_non_finite_vectors(self, non_finite):
+        """Test add rejects non-finite values without changing the store."""
+        store = VectorStore(dimensions=2)
+
+        with pytest.raises(ValueError, match="non-finite"):
+            store.add([[non_finite, 1.0]], [{"id": "invalid"}])
+
+        assert len(store) == 0
+        assert len(store.metadata) == 0
+
     def test_cosine_search_returns_vector_hits(self):
         """Test preferred cosine_search returns typed vector hits."""
         store = VectorStore[dict[str, str]](dimensions=3)
@@ -349,6 +360,37 @@ class TestVectorStore:
         assert store.dot_search([1.0, 0.0], within_rows=[]) == []
         with pytest.raises(IndexError, match="outside"):
             store.euclidean_search([1.0, 0.0], within_rows=[1])
+
+    @pytest.mark.parametrize(
+        "search_name", ["cosine_search", "dot_search", "euclidean_search"]
+    )
+    @pytest.mark.parametrize("non_finite", [np.nan, np.inf, -np.inf])
+    def test_metric_searches_reject_non_finite_queries(self, search_name, non_finite):
+        """Test every metric rejects non-finite query values."""
+        store = VectorStore(dimensions=2, normalize=False)
+        store.add([[1.0, 0.0]], [{"id": "x"}])
+
+        with pytest.raises(ValueError, match="finite"):
+            getattr(store, search_name)([non_finite, 0.0])
+
+    @pytest.mark.parametrize(
+        ("search_name", "threshold_name"),
+        [
+            ("cosine_search", "min_value"),
+            ("dot_search", "min_value"),
+            ("euclidean_search", "max_value"),
+        ],
+    )
+    @pytest.mark.parametrize("non_finite", [np.nan, np.inf, -np.inf])
+    def test_metric_searches_reject_non_finite_thresholds(
+        self, search_name, threshold_name, non_finite
+    ):
+        """Test every metric rejects non-finite result thresholds."""
+        store = VectorStore(dimensions=2)
+        store.add([[1.0, 0.0]], [{"id": "x"}])
+
+        with pytest.raises(ValueError, match=threshold_name):
+            getattr(store, search_name)([1.0, 0.0], **{threshold_name: non_finite})
 
     def test_get(self):
         """Test retrieving vector and metadata by index."""
@@ -629,6 +671,28 @@ class TestVectorStore:
             store = VectorStore(dimensions=2, file_path=file_path, normalize=False)
             with pytest.raises(ValueError, match="zero-norm"):
                 store.load()
+        finally:
+            Path(file_path).unlink(missing_ok=True)
+
+    @pytest.mark.parametrize("non_finite", [np.nan, np.inf, -np.inf])
+    def test_load_raises_on_non_finite_vectors(self, non_finite):
+        """Test load rejects persisted non-finite vectors."""
+        with tempfile.NamedTemporaryFile(suffix=".npz", delete=False) as tmp:
+            file_path = tmp.name
+
+        try:
+            np.savez_compressed(
+                file_path,
+                vectors=np.array([[non_finite, 1.0]], dtype=np.float32),
+                metadata=np.array([{"id": "invalid"}], dtype=object),
+            )
+
+            store = VectorStore(dimensions=2, file_path=file_path)
+            with pytest.raises(ValueError, match="non-finite"):
+                store.load()
+
+            assert len(store) == 0
+            assert len(store.metadata) == 0
         finally:
             Path(file_path).unlink(missing_ok=True)
 
