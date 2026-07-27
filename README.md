@@ -89,6 +89,18 @@ search. Because cosine similarity is undefined for zero vectors,
 `cosine_search` raises an error when its selected rows include one; use
 `within_rows` to exclude zero rows when needed.
 
+### Numerical inputs
+
+Stored vectors use `float32` to keep the store compact. Vectors and queries must
+remain finite when converted to `float32`, and search thresholds must also be
+finite. Invalid values are rejected before they can affect stored state or
+ranking.
+
+Norms and raw metric values use `float64` accumulation where `float32`
+intermediate calculations could overflow or underflow. This allows finite
+`float32` vectors across the representable magnitude range to be normalized and
+compared reliably.
+
 | Method | `normalize=True` default | `normalize=False` |
 |---|---|---|
 | `cosine_search` | True cosine similarity over stored unit vectors; fastest/default path for embeddings | True cosine similarity over raw vectors; computes vector norms during search |

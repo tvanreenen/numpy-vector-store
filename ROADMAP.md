@@ -58,6 +58,8 @@ Planned changes:
 - Validate vectors and queries for finite numeric values.
 - Normalize large finite vectors without overflowing intermediate `float32`
   calculations.
+- Accumulate raw metric values in `float64` when `float32` intermediates could
+  overflow.
 - Permit zero vectors in raw stores used for dot-product or Euclidean search,
   while keeping cosine similarity's undefined zero-vector behavior explicit.
 - Make extensionless persistence paths save and load the same `.npz` file.
