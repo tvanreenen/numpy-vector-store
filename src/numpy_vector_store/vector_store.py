@@ -65,7 +65,7 @@ class VectorStore(Generic[TMetadata]):
         When normalize=True, vectors are normalized at insert time. Metadata
         items are stored as opaque payloads and returned with vector hits.
         """
-        vectors_2d = np.asarray(vectors, dtype=np.float32)
+        vectors_2d = self._to_float32_array(vectors)
         if vectors_2d.ndim != 2:
             raise ValueError("vectors must be a 2D array")
 
@@ -83,7 +83,8 @@ class VectorStore(Generic[TMetadata]):
 
         vectors_to_store = self._prepare_vectors_for_storage(
             vectors_2d,
-            error_message="Cannot add zero-norm vectors",
+            zero_norm_error_message="Cannot add zero-norm vectors",
+            non_finite_error_message="Cannot add vectors containing non-finite values",
         )
 
         if len(self.vectors) == 0:
@@ -105,13 +106,14 @@ class VectorStore(Generic[TMetadata]):
                 files = set(data.files)
                 self._validate_required_fields(files)
 
-                loaded_vectors = np.asarray(data["vectors"], dtype=np.float32)
+                loaded_vectors = self._to_float32_array(data["vectors"])
                 loaded_metadata = np.array(data["metadata"], copy=True)
 
             self._validate_loaded_arrays(loaded_vectors, loaded_metadata)
             loaded_vectors = self._prepare_vectors_for_storage(
                 loaded_vectors,
-                error_message="Loaded vectors contain zero-norm vectors",
+                zero_norm_error_message="Loaded vectors contain zero-norm vectors",
+                non_finite_error_message="Loaded vectors contain non-finite values",
             )
 
             self.vectors = loaded_vectors
@@ -211,31 +213,52 @@ class VectorStore(Generic[TMetadata]):
     ) -> npt.NDArray[np.float32]:
         """Compute cosine similarity values."""
         query_norm = self._normalize_query(query)
-        values = np.dot(vectors, query_norm)
 
-        if not self.normalize:
-            vector_norms = np.linalg.norm(vectors, axis=1)
+        if self.normalize:
+            values = np.dot(vectors, query_norm)
+        else:
+            vector_norms = self._row_norms(vectors)
             if np.any(vector_norms == 0):
                 raise ValueError("Cannot cosine search zero-norm stored vectors")
-            values = values / vector_norms
+            values = (
+                np.einsum(
+                    "ij,j->i",
+                    vectors,
+                    query_norm,
+                    dtype=np.float64,
+                )
+                / vector_norms
+            )
 
         return np.asarray(values, dtype=np.float32)
 
     def _dot_values(
         self, query: npt.NDArray[np.float32], vectors: npt.NDArray[np.float32]
-    ) -> npt.NDArray[np.float32]:
+    ) -> npt.NDArray[np.float64]:
         """Compute dot product values."""
         if self.normalize:
             query = self._normalize_query(query)
-        return np.asarray(np.dot(vectors, query), dtype=np.float32)
+            values = np.dot(vectors, query)
+        else:
+            values = np.einsum(
+                "ij,j->i",
+                vectors,
+                query,
+                dtype=np.float64,
+            )
+        return np.asarray(values, dtype=np.float64)
 
     def _euclidean_values(
         self, query: npt.NDArray[np.float32], vectors: npt.NDArray[np.float32]
-    ) -> npt.NDArray[np.float32]:
+    ) -> npt.NDArray[np.float64]:
         """Compute Euclidean distance values."""
         if self.normalize:
             query = self._normalize_query(query)
-        return np.asarray(np.linalg.norm(vectors - query, axis=1), dtype=np.float32)
+            differences = vectors - query
+        else:
+            differences = np.empty(vectors.shape, dtype=np.float64)
+            np.subtract(vectors, query, out=differences, dtype=np.float64)
+        return np.asarray(np.linalg.norm(differences, axis=1), dtype=np.float64)
 
     def get(self, index: int) -> tuple[npt.NDArray[np.float32], TMetadata] | None:
         """Get a stored vector and metadata payload by row index."""
@@ -266,39 +289,81 @@ class VectorStore(Generic[TMetadata]):
     ) -> npt.NDArray[Any]:
         return np.asarray(metadata, dtype=object)
 
+    def _to_float32_array(self, values: npt.ArrayLike) -> npt.NDArray[np.float32]:
+        with np.errstate(over="ignore", invalid="ignore"):
+            return np.asarray(values, dtype=np.float32)
+
     def _prepare_vectors_for_storage(
-        self, vectors: npt.NDArray[np.float32], *, error_message: str
+        self,
+        vectors: npt.NDArray[np.float32],
+        *,
+        zero_norm_error_message: str,
+        non_finite_error_message: str,
     ) -> npt.NDArray[np.float32]:
-        norms = self._validate_non_zero_vectors(vectors, error_message=error_message)
+        if not np.all(np.isfinite(vectors)):
+            raise ValueError(non_finite_error_message)
+
         if self.normalize:
+            norms = self._validate_non_zero_vectors(
+                vectors,
+                zero_norm_error_message=zero_norm_error_message,
+            )
             return np.asarray(vectors / norms[:, np.newaxis], dtype=np.float32)
         return vectors.astype(np.float32, copy=True)
 
     def _validate_non_zero_vectors(
-        self, vectors: npt.NDArray[np.float32], *, error_message: str
-    ) -> npt.NDArray[np.float32]:
-        norms = np.linalg.norm(vectors, axis=1)
+        self,
+        vectors: npt.NDArray[np.float32],
+        *,
+        zero_norm_error_message: str,
+    ) -> npt.NDArray[np.float64]:
+        norms = self._row_norms(vectors)
         if np.any(norms == 0):
-            raise ValueError(error_message)
-        return np.asarray(norms, dtype=np.float32)
+            raise ValueError(zero_norm_error_message)
+        return norms
+
+    def _row_norms(self, vectors: npt.NDArray[np.float32]) -> npt.NDArray[np.float64]:
+        squared_norms = np.einsum(
+            "ij,ij->i",
+            vectors,
+            vectors,
+            dtype=np.float64,
+        )
+        return np.asarray(np.sqrt(squared_norms), dtype=np.float64)
 
     def _validate_query(self, query: npt.ArrayLike) -> npt.NDArray[np.float32]:
-        query_vector = np.asarray(query, dtype=np.float32)
+        query_vector = self._to_float32_array(query)
         if query_vector.ndim != 1:
             raise ValueError("Query vector must be a 1D array")
         if len(query_vector) != self.dimensions:
             raise ValueError(
                 f"Query vector dimension {len(query_vector)} doesn't match store dimensions {self.dimensions}"
             )
+        if not np.all(np.isfinite(query_vector)):
+            raise ValueError("Query vector must contain only finite values")
         return query_vector
+
+    def _validate_search_threshold(
+        self, value: float | None, *, name: str
+    ) -> float | None:
+        if value is None:
+            return None
+
+        value = float(value)
+        if not np.isfinite(value):
+            raise ValueError(f"{name} must be finite")
+        return value
 
     def _normalize_query(
         self, query: npt.NDArray[np.float32]
     ) -> npt.NDArray[np.float32]:
-        query_magnitude = np.linalg.norm(query)
+        query_magnitude = np.linalg.norm(query.astype(np.float64))
         if query_magnitude == 0:
             raise ValueError("Cannot search with zero-norm query vector")
-        return np.asarray(query / query_magnitude, dtype=np.float32)
+        return np.asarray(
+            query.astype(np.float64) / query_magnitude,
+            dtype=np.float32,
+        )
 
     def _normalize_within_rows(
         self, within_rows: Sequence[int] | npt.NDArray[np.integer[Any]] | None
@@ -327,13 +392,15 @@ class VectorStore(Generic[TMetadata]):
         within_rows: Sequence[int] | npt.NDArray[np.integer[Any]] | None,
         values_fn: Callable[
             [npt.NDArray[np.float32], npt.NDArray[np.float32]],
-            npt.NDArray[np.float32],
+            npt.NDArray[np.float32] | npt.NDArray[np.float64],
         ],
         descending: bool,
         min_value: float | None,
         max_value: float | None,
     ) -> list[VectorHit[TMetadata]]:
         query_vector = self._validate_query(query)
+        min_value = self._validate_search_threshold(min_value, name="min_value")
+        max_value = self._validate_search_threshold(max_value, name="max_value")
 
         if top_k <= 0:
             raise ValueError("top_k must be greater than 0")

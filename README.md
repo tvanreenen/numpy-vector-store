@@ -83,8 +83,23 @@ which is the common case for semantic embeddings. Use `normalize=False` when
 vector length matters, such as when magnitude encodes strength, confidence,
 counts, scale, or raw geometry.
 
-Zero vectors are rejected in both modes because cosine similarity is undefined
-for zero-norm vectors.
+Zero vectors are rejected when `normalize=True` because they cannot be scaled to
+unit length. Raw stores accept zero vectors for dot-product and Euclidean
+search. Because cosine similarity is undefined for zero vectors,
+`cosine_search` raises an error when its selected rows include one; use
+`within_rows` to exclude zero rows when needed.
+
+### Numerical inputs
+
+Stored vectors use `float32` to keep the store compact. Vectors and queries must
+remain finite when converted to `float32`, and search thresholds must also be
+finite. Invalid values are rejected before they can affect stored state or
+ranking.
+
+Norms and raw metric values use `float64` accumulation where `float32`
+intermediate calculations could overflow or underflow. This allows finite
+`float32` vectors across the representable magnitude range to be normalized and
+compared reliably.
 
 | Method | `normalize=True` default | `normalize=False` |
 |---|---|---|

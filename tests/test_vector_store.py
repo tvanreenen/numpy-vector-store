@@ -1,6 +1,7 @@
 """Tests for the VectorStore class."""
 
 import tempfile
+import warnings
 from pathlib import Path
 
 import numpy as np
@@ -54,6 +55,22 @@ class TestVectorStore:
 
         np.testing.assert_array_almost_equal(store.vectors[0], np.array([0.6, 0.8]))
 
+    @pytest.mark.parametrize(
+        "magnitude",
+        [
+            np.float32(1e20),
+            np.nextafter(np.float32(0), np.float32(1)),
+        ],
+    )
+    def test_add_normalizes_extreme_finite_vectors(self, magnitude):
+        """Test normalization avoids float32 overflow and underflow."""
+        store = VectorStore[dict[str, str]](dimensions=2)
+
+        store.add([[magnitude, magnitude]], [{"id": "extreme"}])
+
+        expected = np.array([1 / np.sqrt(2), 1 / np.sqrt(2)])
+        np.testing.assert_allclose(store.vectors[0], expected, rtol=1e-6)
+
     def test_add_preserves_raw_vectors_when_normalize_false(self):
         """Test add preserves original vectors when normalize=False."""
         store = VectorStore[dict[str, str]](dimensions=2, normalize=False)
@@ -98,12 +115,35 @@ class TestVectorStore:
         with pytest.raises(ValueError, match="zero-norm"):
             store.add([[0.0, 0.0, 0.0]], [{"id": "zero"}])
 
-    def test_add_rejects_zero_norm_vector_when_normalize_false(self):
-        """Test add rejects zero vectors because cosine search is always available."""
+    def test_add_allows_zero_norm_vector_when_normalize_false(self):
+        """Test raw stores preserve zero vectors for dot and Euclidean search."""
         store = VectorStore(dimensions=3, normalize=False)
 
-        with pytest.raises(ValueError, match="zero-norm"):
-            store.add([[0.0, 0.0, 0.0]], [{"id": "zero"}])
+        store.add([[0.0, 0.0, 0.0]], [{"id": "zero"}])
+
+        np.testing.assert_array_equal(store.get(0)[0], np.zeros(3))
+        assert store.dot_search([1.0, 0.0, 0.0])[0].value == pytest.approx(0.0)
+        assert store.euclidean_search([3.0, 4.0, 0.0])[0].value == pytest.approx(5.0)
+
+    @pytest.mark.parametrize("non_finite", [np.nan, np.inf, -np.inf])
+    def test_add_rejects_non_finite_vectors(self, non_finite):
+        """Test add rejects non-finite values without changing the store."""
+        store = VectorStore(dimensions=2)
+
+        with pytest.raises(ValueError, match="non-finite"):
+            store.add([[non_finite, 1.0]], [{"id": "invalid"}])
+
+        assert len(store) == 0
+        assert len(store.metadata) == 0
+
+    def test_add_rejects_values_outside_float32_without_warning(self):
+        """Test out-of-range values produce only the validation error."""
+        store = VectorStore(dimensions=2)
+
+        with warnings.catch_warnings():
+            warnings.simplefilter("error", RuntimeWarning)
+            with pytest.raises(ValueError, match="non-finite"):
+                store.add([[1e100, 1.0]], [{"id": "out-of-range"}])
 
     def test_cosine_search_returns_vector_hits(self):
         """Test preferred cosine_search returns typed vector hits."""
@@ -228,6 +268,22 @@ class TestVectorStore:
         with pytest.raises(ValueError, match="zero-norm"):
             store.cosine_search([0.0, 0.0, 0.0])
 
+    @pytest.mark.parametrize(
+        "magnitude",
+        [
+            np.float32(1e20),
+            np.nextafter(np.float32(0), np.float32(1)),
+        ],
+    )
+    def test_cosine_search_normalizes_extreme_finite_queries(self, magnitude):
+        """Test query normalization avoids float32 overflow and underflow."""
+        store = VectorStore(dimensions=2)
+        store.add([[1.0, 0.0]], [{"id": "x"}])
+
+        result = store.cosine_search([magnitude, magnitude])[0]
+
+        assert result.value == pytest.approx(1 / np.sqrt(2), rel=1e-6)
+
     def test_cosine_search_no_valid_results(self):
         """Test cosine_search when no results meet min_value."""
         store = VectorStore(dimensions=3)
@@ -253,6 +309,27 @@ class TestVectorStore:
         assert [hit.index for hit in results] == [0, 2, 1]
         assert [hit.value for hit in results] == pytest.approx([1.0, 0.6, 0.0])
 
+    def test_cosine_search_with_large_raw_vectors(self):
+        """Test raw cosine norms do not overflow float32."""
+        store = VectorStore[str](dimensions=2, normalize=False)
+        store.add([[1e20, 1e20]], ["large"])
+
+        result = store.cosine_search([1e20, 1e20])[0]
+
+        assert result.value == pytest.approx(1.0)
+
+    def test_cosine_search_rejects_selected_zero_norm_stored_vectors(self):
+        """Test raw cosine search rejects selected zero vectors."""
+        store = VectorStore[str](dimensions=2, normalize=False)
+        store.add([[0.0, 0.0], [1.0, 0.0]], ["zero", "x"])
+
+        with pytest.raises(ValueError, match="zero-norm stored vectors"):
+            store.cosine_search([1.0, 0.0])
+
+        result = store.cosine_search([1.0, 0.0], within_rows=[1])[0]
+        assert result.index == 1
+        assert result.value == pytest.approx(1.0)
+
     def test_dot_search_with_raw_vectors(self):
         """Test dot_search ranks by true dot product when normalize=False."""
         store = VectorStore[dict[str, str]](dimensions=2, normalize=False)
@@ -266,6 +343,18 @@ class TestVectorStore:
         assert all(isinstance(hit, VectorHit) for hit in results)
         assert [hit.index for hit in results] == [0, 2, 1]
         assert [hit.value for hit in results] == pytest.approx([10.0, 3.0, 0.0])
+
+    def test_dot_search_with_large_raw_vectors(self):
+        """Test raw dot products do not overflow float32."""
+        magnitude = np.finfo(np.float32).max
+        store = VectorStore[str](dimensions=2, normalize=False)
+        store.add([[magnitude, magnitude]], ["large"])
+
+        result = store.dot_search([magnitude, magnitude])[0]
+
+        expected = 2 * float(magnitude) ** 2
+        assert np.isfinite(result.value)
+        assert result.value == pytest.approx(expected)
 
     def test_dot_search_with_normalized_vectors(self):
         """Test dot_search uses stored unit vectors when normalize=True."""
@@ -295,6 +384,18 @@ class TestVectorStore:
         assert [hit.value for hit in results] == pytest.approx(
             [1.0, np.sqrt(2.0), np.sqrt(18.0)]
         )
+
+    def test_euclidean_search_with_large_raw_vectors(self):
+        """Test raw Euclidean distances do not overflow float32."""
+        magnitude = np.finfo(np.float32).max
+        store = VectorStore[str](dimensions=2, normalize=False)
+        store.add([[magnitude, magnitude]], ["large"])
+
+        result = store.euclidean_search([-magnitude, -magnitude])[0]
+
+        expected = np.sqrt(8) * float(magnitude)
+        assert np.isfinite(result.value)
+        assert result.value == pytest.approx(expected)
 
     def test_euclidean_search_with_max_value(self):
         """Test euclidean_search max_value filters by distance."""
@@ -349,6 +450,47 @@ class TestVectorStore:
         assert store.dot_search([1.0, 0.0], within_rows=[]) == []
         with pytest.raises(IndexError, match="outside"):
             store.euclidean_search([1.0, 0.0], within_rows=[1])
+
+    @pytest.mark.parametrize(
+        "search_name", ["cosine_search", "dot_search", "euclidean_search"]
+    )
+    @pytest.mark.parametrize("non_finite", [np.nan, np.inf, -np.inf])
+    def test_metric_searches_reject_non_finite_queries(self, search_name, non_finite):
+        """Test every metric rejects non-finite query values."""
+        store = VectorStore(dimensions=2, normalize=False)
+        store.add([[1.0, 0.0]], [{"id": "x"}])
+
+        with pytest.raises(ValueError, match="finite"):
+            getattr(store, search_name)([non_finite, 0.0])
+
+    def test_search_rejects_query_outside_float32_without_warning(self):
+        """Test an out-of-range query produces only the validation error."""
+        store = VectorStore(dimensions=2)
+        store.add([[1.0, 0.0]], [{"id": "x"}])
+
+        with warnings.catch_warnings():
+            warnings.simplefilter("error", RuntimeWarning)
+            with pytest.raises(ValueError, match="finite"):
+                store.cosine_search([1e100, 0.0])
+
+    @pytest.mark.parametrize(
+        ("search_name", "threshold_name"),
+        [
+            ("cosine_search", "min_value"),
+            ("dot_search", "min_value"),
+            ("euclidean_search", "max_value"),
+        ],
+    )
+    @pytest.mark.parametrize("non_finite", [np.nan, np.inf, -np.inf])
+    def test_metric_searches_reject_non_finite_thresholds(
+        self, search_name, threshold_name, non_finite
+    ):
+        """Test every metric rejects non-finite result thresholds."""
+        store = VectorStore(dimensions=2)
+        store.add([[1.0, 0.0]], [{"id": "x"}])
+
+        with pytest.raises(ValueError, match=threshold_name):
+            getattr(store, search_name)([1.0, 0.0], **{threshold_name: non_finite})
 
     def test_get(self):
         """Test retrieving vector and metadata by index."""
@@ -614,8 +756,8 @@ class TestVectorStore:
         finally:
             Path(file_path).unlink(missing_ok=True)
 
-    def test_load_raises_on_zero_norm_vectors_when_normalize_false(self):
-        """Test raw stores reject zero rows because cosine search is always available."""
+    def test_load_allows_zero_norm_vectors_when_normalize_false(self):
+        """Test raw stores load zero rows for dot and Euclidean search."""
         with tempfile.NamedTemporaryFile(suffix=".npz", delete=False) as tmp:
             file_path = tmp.name
 
@@ -627,8 +769,55 @@ class TestVectorStore:
             )
 
             store = VectorStore(dimensions=2, file_path=file_path, normalize=False)
-            with pytest.raises(ValueError, match="zero-norm"):
+            store.load()
+
+            np.testing.assert_array_equal(store.get(0)[0], np.zeros(2))
+            assert store.dot_search([1.0, 0.0])[0].value == pytest.approx(0.0)
+            assert store.euclidean_search([3.0, 4.0])[0].value == pytest.approx(5.0)
+            with pytest.raises(ValueError, match="zero-norm stored vectors"):
+                store.cosine_search([1.0, 0.0])
+        finally:
+            Path(file_path).unlink(missing_ok=True)
+
+    @pytest.mark.parametrize("non_finite", [np.nan, np.inf, -np.inf])
+    def test_load_raises_on_non_finite_vectors(self, non_finite):
+        """Test load rejects persisted non-finite vectors."""
+        with tempfile.NamedTemporaryFile(suffix=".npz", delete=False) as tmp:
+            file_path = tmp.name
+
+        try:
+            np.savez_compressed(
+                file_path,
+                vectors=np.array([[non_finite, 1.0]], dtype=np.float32),
+                metadata=np.array([{"id": "invalid"}], dtype=object),
+            )
+
+            store = VectorStore(dimensions=2, file_path=file_path)
+            with pytest.raises(ValueError, match="non-finite"):
                 store.load()
+
+            assert len(store) == 0
+            assert len(store.metadata) == 0
+        finally:
+            Path(file_path).unlink(missing_ok=True)
+
+    def test_load_rejects_values_outside_float32_without_warning(self):
+        """Test loading out-of-range values produces only the validation error."""
+        with tempfile.NamedTemporaryFile(suffix=".npz", delete=False) as tmp:
+            file_path = tmp.name
+
+        try:
+            np.savez_compressed(
+                file_path,
+                vectors=np.array([[1e100, 1.0]], dtype=np.float64),
+                metadata=np.array([{"id": "out-of-range"}], dtype=object),
+            )
+
+            store = VectorStore(dimensions=2, file_path=file_path)
+            with warnings.catch_warnings():
+                warnings.simplefilter("error", RuntimeWarning)
+                with pytest.raises(ValueError, match="non-finite"):
+                    store.load()
         finally:
             Path(file_path).unlink(missing_ok=True)
 
