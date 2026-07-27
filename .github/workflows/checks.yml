@@ -1,4 +1,4 @@
-name: Continuous integration
+name: Checks
 
 on:
   workflow_call:
@@ -9,7 +9,7 @@ on:
   workflow_dispatch:
 
 concurrency:
-  group: ci-${{ github.workflow }}-${{ github.ref }}
+  group: checks-${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
 
 permissions:
