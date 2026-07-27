@@ -189,6 +189,9 @@ loaded = VectorStore[dict[str, str]](dimensions=1536, file_path="vectors.npz")
 loaded.load()
 ```
 
+The `.npz` suffix may be omitted. An extensionless path such as `"vectors"` is
+resolved to `"vectors.npz"` for both saving and loading.
+
 If you save with `normalize=False`, load with `normalize=False` too:
 
 ```python

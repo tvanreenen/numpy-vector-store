@@ -48,7 +48,7 @@ class VectorStore(Generic[TMetadata]):
             raise ValueError("dimensions must be greater than 0")
 
         self.dimensions = dimensions
-        self.file_path = Path(file_path) if file_path else None
+        self.file_path = self._resolve_file_path(file_path)
         self.normalize = normalize
         self.vectors: npt.NDArray[np.float32] = np.empty(
             (0, dimensions), dtype=np.float32
@@ -288,6 +288,15 @@ class VectorStore(Generic[TMetadata]):
         self, metadata: Sequence[TMetadata] | npt.NDArray[Any]
     ) -> npt.NDArray[Any]:
         return np.asarray(metadata, dtype=object)
+
+    def _resolve_file_path(self, file_path: str | Path | None) -> Path | None:
+        if not file_path:
+            return None
+
+        path = Path(file_path)
+        if path.suffix != ".npz":
+            return Path(f"{path}.npz")
+        return path
 
     def _to_float32_array(self, values: npt.ArrayLike) -> npt.NDArray[np.float32]:
         with np.errstate(over="ignore", invalid="ignore"):
