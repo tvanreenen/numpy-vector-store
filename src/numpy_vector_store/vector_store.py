@@ -101,24 +101,25 @@ class VectorStore(Generic[TMetadata]):
         if self._loaded or not self.file_path:
             return
 
-        if self.file_path.exists():
-            with np.load(self.file_path, allow_pickle=True) as data:
-                files = set(data.files)
-                self._validate_required_fields(files)
+        if not self.file_path.exists():
+            return
 
-                loaded_vectors = self._to_float32_array(data["vectors"])
-                loaded_metadata = np.array(data["metadata"], copy=True)
+        with np.load(self.file_path, allow_pickle=True) as data:
+            files = set(data.files)
+            self._validate_required_fields(files)
 
-            self._validate_loaded_arrays(loaded_vectors, loaded_metadata)
-            loaded_vectors = self._prepare_vectors_for_storage(
-                loaded_vectors,
-                zero_norm_error_message="Loaded vectors contain zero-norm vectors",
-                non_finite_error_message="Loaded vectors contain non-finite values",
-            )
+            loaded_vectors = self._to_float32_array(data["vectors"])
+            loaded_metadata = np.array(data["metadata"], copy=True)
 
-            self.vectors = loaded_vectors
-            self.metadata = loaded_metadata
+        self._validate_loaded_arrays(loaded_vectors, loaded_metadata)
+        loaded_vectors = self._prepare_vectors_for_storage(
+            loaded_vectors,
+            zero_norm_error_message="Loaded vectors contain zero-norm vectors",
+            non_finite_error_message="Loaded vectors contain non-finite values",
+        )
 
+        self.vectors = loaded_vectors
+        self.metadata = loaded_metadata
         self._loaded = True
 
     def save(self) -> None:
@@ -270,6 +271,7 @@ class VectorStore(Generic[TMetadata]):
         """Clear all vectors and metadata from the store."""
         self.vectors = np.empty((0, self.dimensions), dtype=np.float32)
         self.metadata = np.array([], dtype=object)
+        self._loaded = False
 
     def __len__(self) -> int:
         """Return the number of stored vector rows."""
