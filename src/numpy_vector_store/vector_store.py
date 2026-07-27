@@ -234,19 +234,30 @@ class VectorStore(Generic[TMetadata]):
 
     def _dot_values(
         self, query: npt.NDArray[np.float32], vectors: npt.NDArray[np.float32]
-    ) -> npt.NDArray[np.float32]:
+    ) -> npt.NDArray[np.float64]:
         """Compute dot product values."""
         if self.normalize:
             query = self._normalize_query(query)
-        return np.asarray(np.dot(vectors, query), dtype=np.float32)
+            values = np.dot(vectors, query)
+        else:
+            values = np.einsum(
+                "ij,j->i",
+                vectors,
+                query,
+                dtype=np.float64,
+            )
+        return np.asarray(values, dtype=np.float64)
 
     def _euclidean_values(
         self, query: npt.NDArray[np.float32], vectors: npt.NDArray[np.float32]
-    ) -> npt.NDArray[np.float32]:
+    ) -> npt.NDArray[np.float64]:
         """Compute Euclidean distance values."""
         if self.normalize:
             query = self._normalize_query(query)
-        return np.asarray(np.linalg.norm(vectors - query, axis=1), dtype=np.float32)
+            differences = vectors - query
+        else:
+            differences = vectors.astype(np.float64) - query.astype(np.float64)
+        return np.asarray(np.linalg.norm(differences, axis=1), dtype=np.float64)
 
     def get(self, index: int) -> tuple[npt.NDArray[np.float32], TMetadata] | None:
         """Get a stored vector and metadata payload by row index."""
@@ -376,7 +387,7 @@ class VectorStore(Generic[TMetadata]):
         within_rows: Sequence[int] | npt.NDArray[np.integer[Any]] | None,
         values_fn: Callable[
             [npt.NDArray[np.float32], npt.NDArray[np.float32]],
-            npt.NDArray[np.float32],
+            npt.NDArray[np.float32] | npt.NDArray[np.float64],
         ],
         descending: bool,
         min_value: float | None,

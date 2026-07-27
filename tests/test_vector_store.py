@@ -334,6 +334,18 @@ class TestVectorStore:
         assert [hit.index for hit in results] == [0, 2, 1]
         assert [hit.value for hit in results] == pytest.approx([10.0, 3.0, 0.0])
 
+    def test_dot_search_with_large_raw_vectors(self):
+        """Test raw dot products do not overflow float32."""
+        magnitude = np.finfo(np.float32).max
+        store = VectorStore[str](dimensions=2, normalize=False)
+        store.add([[magnitude, magnitude]], ["large"])
+
+        result = store.dot_search([magnitude, magnitude])[0]
+
+        expected = 2 * float(magnitude) ** 2
+        assert np.isfinite(result.value)
+        assert result.value == pytest.approx(expected)
+
     def test_dot_search_with_normalized_vectors(self):
         """Test dot_search uses stored unit vectors when normalize=True."""
         store = VectorStore[dict[str, str]](dimensions=2)
@@ -362,6 +374,18 @@ class TestVectorStore:
         assert [hit.value for hit in results] == pytest.approx(
             [1.0, np.sqrt(2.0), np.sqrt(18.0)]
         )
+
+    def test_euclidean_search_with_large_raw_vectors(self):
+        """Test raw Euclidean distances do not overflow float32."""
+        magnitude = np.finfo(np.float32).max
+        store = VectorStore[str](dimensions=2, normalize=False)
+        store.add([[magnitude, magnitude]], ["large"])
+
+        result = store.euclidean_search([-magnitude, -magnitude])[0]
+
+        expected = np.sqrt(8) * float(magnitude)
+        assert np.isfinite(result.value)
+        assert result.value == pytest.approx(expected)
 
     def test_euclidean_search_with_max_value(self):
         """Test euclidean_search max_value filters by distance."""
