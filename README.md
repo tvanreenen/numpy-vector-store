@@ -240,16 +240,18 @@ process. Loading untrusted `.npz` files is not a supported security model.
 ## Compatibility
 
 This project is still pre-1.0, so occasional breaking changes are expected while
-the API stabilizes. Breaking changes are documented in GitHub release notes.
-Deprecated APIs will keep warning for at least one point release before removal.
+the API stabilizes. Changes are documented in the [changelog](CHANGELOG.md) and
+GitHub release notes. Deprecated APIs will keep warning for at least one point
+release before removal.
 
 Supported Python versions are listed in the package classifiers and exercised
 in CI. The project generally retains stable CPython versions until their
 upstream end-of-life, adds new versions after its dependencies and CI support
 them, and drops versions only in minor releases.
 
-See the [project roadmap](ROADMAP.md) for the planned path to stable API and
-persistence contracts.
+See the [changelog](CHANGELOG.md) for release history and the
+[project roadmap](ROADMAP.md) for the planned path to stable API and persistence
+contracts.
 
 ## Contributing
 
