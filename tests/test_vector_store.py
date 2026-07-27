@@ -600,6 +600,29 @@ class TestVectorStore:
         finally:
             Path(file_path).unlink(missing_ok=True)
 
+    def test_opaque_metadata_payloads_round_trip(self, tmp_path):
+        """Test each opaque payload remains one row after saving and loading."""
+        file_path = tmp_path / "vectors.npz"
+        payloads = [
+            ("tuple", 1),
+            ["list", 2],
+            MetadataRecord(identifier=3, label="dataclass"),
+            "scalar",
+            {"id": 5},
+        ]
+        store = VectorStore[object](dimensions=2, file_path=file_path)
+        store.add(
+            [[1.0, 0.0], [0.0, 1.0], [1.0, 1.0], [1.0, -1.0], [2.0, 1.0]],
+            payloads,
+        )
+        store.save()
+
+        loaded = VectorStore[object](dimensions=2, file_path=file_path)
+        loaded.load()
+
+        assert loaded.metadata.shape == (5,)
+        assert loaded.metadata.tolist() == payloads
+
     def test_load_supports_minimal_format(self):
         """Test files with vectors and metadata load."""
         with tempfile.NamedTemporaryFile(suffix=".npz", delete=False) as tmp:
