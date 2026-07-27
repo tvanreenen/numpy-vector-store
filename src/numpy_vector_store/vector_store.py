@@ -256,7 +256,8 @@ class VectorStore(Generic[TMetadata]):
             query = self._normalize_query(query)
             differences = vectors - query
         else:
-            differences = vectors.astype(np.float64) - query.astype(np.float64)
+            differences = np.empty(vectors.shape, dtype=np.float64)
+            np.subtract(vectors, query, out=differences, dtype=np.float64)
         return np.asarray(np.linalg.norm(differences, axis=1), dtype=np.float64)
 
     def get(self, index: int) -> tuple[npt.NDArray[np.float32], TMetadata] | None:
