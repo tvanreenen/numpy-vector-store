@@ -537,6 +537,24 @@ class TestVectorStore:
         finally:
             Path(file_path).unlink(missing_ok=True)
 
+    def test_save_and_load_with_extensionless_path(self, tmp_path):
+        """Test extensionless paths resolve to the same .npz file."""
+        file_path = tmp_path / "vectors"
+        expected_path = tmp_path / "vectors.npz"
+
+        store1 = VectorStore(dimensions=2, file_path=file_path)
+        add_single_vector(store1, np.array([1.0, 2.0]), {"id": "test"})
+        store1.save()
+
+        assert store1.file_path == expected_path
+        assert expected_path.exists()
+
+        store2 = VectorStore(dimensions=2, file_path=file_path)
+        store2.load()
+
+        assert len(store2) == 1
+        assert store2.get(0)[1] == {"id": "test"}
+
     def test_save_writes_minimal_persistence_contract(self):
         """Test saves contain only vectors and metadata arrays."""
         with tempfile.NamedTemporaryFile(suffix=".npz", delete=False) as tmp:
@@ -629,6 +647,21 @@ class TestVectorStore:
         finally:
             Path(file_path).unlink(missing_ok=True)
 
+    def test_load_retries_after_file_is_created(self, tmp_path):
+        """Test a missing file does not prevent a later load attempt."""
+        file_path = tmp_path / "vectors.npz"
+        store = VectorStore(dimensions=2, file_path=file_path)
+
+        store.load()
+
+        persisted = VectorStore(dimensions=2, file_path=file_path)
+        add_single_vector(persisted, np.array([1.0, 2.0]), {"id": "created"})
+        persisted.save()
+        store.load()
+
+        assert len(store) == 1
+        assert store.get(0)[1] == {"id": "created"}
+
     def test_load_already_loaded(self):
         """Test loading when already loaded."""
         with tempfile.NamedTemporaryFile(suffix=".npz", delete=False) as tmp:
@@ -646,6 +679,20 @@ class TestVectorStore:
             assert len(store2.vectors) == 1
         finally:
             Path(file_path).unlink(missing_ok=True)
+
+    def test_load_after_clear_restores_persisted_rows(self, tmp_path):
+        """Test clear resets load state so persisted rows can be restored."""
+        file_path = tmp_path / "vectors.npz"
+        store = VectorStore(dimensions=2, file_path=file_path)
+        add_single_vector(store, np.array([1.0, 2.0]), {"id": "persisted"})
+        store.save()
+        store.load()
+
+        store.clear()
+        store.load()
+
+        assert len(store) == 1
+        assert store.get(0)[1] == {"id": "persisted"}
 
     def test_load_raises_on_vector_dimension_mismatch(self):
         """Test load fails fast when persisted vector dimensions don't match store."""
