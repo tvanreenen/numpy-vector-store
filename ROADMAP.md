@@ -25,6 +25,26 @@ Deprecated APIs will continue to warn for at least one point release before
 removal. Persisted data will receive an explicit compatibility and migration
 story before the project reaches 1.0.
 
+## Runtime support policy
+
+The Python versions listed in the package classifiers are part of the public
+compatibility contract and are exercised in CI. The project generally:
+
+- Supports stable CPython versions until their upstream end-of-life.
+- Adds a newly stable Python version after NumPy and the project's test suite
+  support it.
+- Drops a Python version only in a minor release and calls out the change in
+  release notes.
+
+The 0.3 series supports Python 3.10 through 3.14. Python 3.10 reaches upstream
+end-of-life in October 2026 and is expected to be removed in 0.4.0 rather than
+in a 0.3 patch release.
+
+Supported NumPy versions are also part of the runtime contract. The declared
+minimum should be installable on the oldest supported Python version and should
+have a dedicated minimum-dependency CI check. The regular Python matrix will
+continue to test the versions selected by the project's lockfile.
+
 ## 0.3.2: Reliability and performance
 
 Status: in progress
@@ -47,6 +67,8 @@ Planned changes:
 - Avoid copying the complete vector matrix during an unfiltered search.
 - Add continuous validation across every supported Python version and require
   equivalent checks before publishing.
+- Align the minimum NumPy requirement with Python 3.10 support and add a
+  minimum-dependency compatibility check.
 
 These changes are intended to preserve results and behavior for valid existing
 usage. Public state access, the persistence format, and context-manager
