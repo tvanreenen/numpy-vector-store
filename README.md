@@ -83,8 +83,11 @@ which is the common case for semantic embeddings. Use `normalize=False` when
 vector length matters, such as when magnitude encodes strength, confidence,
 counts, scale, or raw geometry.
 
-Zero vectors are rejected in both modes because cosine similarity is undefined
-for zero-norm vectors.
+Zero vectors are rejected when `normalize=True` because they cannot be scaled to
+unit length. Raw stores accept zero vectors for dot-product and Euclidean
+search. Because cosine similarity is undefined for zero vectors,
+`cosine_search` raises an error when its selected rows include one; use
+`within_rows` to exclude zero rows when needed.
 
 | Method | `normalize=True` default | `normalize=False` |
 |---|---|---|

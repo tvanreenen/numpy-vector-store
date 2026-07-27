@@ -284,12 +284,14 @@ class VectorStore(Generic[TMetadata]):
         zero_norm_error_message: str,
         non_finite_error_message: str,
     ) -> npt.NDArray[np.float32]:
-        norms = self._validate_non_zero_vectors(
-            vectors,
-            zero_norm_error_message=zero_norm_error_message,
-            non_finite_error_message=non_finite_error_message,
-        )
+        if not np.all(np.isfinite(vectors)):
+            raise ValueError(non_finite_error_message)
+
         if self.normalize:
+            norms = self._validate_non_zero_vectors(
+                vectors,
+                zero_norm_error_message=zero_norm_error_message,
+            )
             return np.asarray(vectors / norms[:, np.newaxis], dtype=np.float32)
         return vectors.astype(np.float32, copy=True)
 
@@ -298,11 +300,7 @@ class VectorStore(Generic[TMetadata]):
         vectors: npt.NDArray[np.float32],
         *,
         zero_norm_error_message: str,
-        non_finite_error_message: str,
     ) -> npt.NDArray[np.float64]:
-        if not np.all(np.isfinite(vectors)):
-            raise ValueError(non_finite_error_message)
-
         norms = self._row_norms(vectors)
         if np.any(norms == 0):
             raise ValueError(zero_norm_error_message)

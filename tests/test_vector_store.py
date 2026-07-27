@@ -114,12 +114,15 @@ class TestVectorStore:
         with pytest.raises(ValueError, match="zero-norm"):
             store.add([[0.0, 0.0, 0.0]], [{"id": "zero"}])
 
-    def test_add_rejects_zero_norm_vector_when_normalize_false(self):
-        """Test add rejects zero vectors because cosine search is always available."""
+    def test_add_allows_zero_norm_vector_when_normalize_false(self):
+        """Test raw stores preserve zero vectors for dot and Euclidean search."""
         store = VectorStore(dimensions=3, normalize=False)
 
-        with pytest.raises(ValueError, match="zero-norm"):
-            store.add([[0.0, 0.0, 0.0]], [{"id": "zero"}])
+        store.add([[0.0, 0.0, 0.0]], [{"id": "zero"}])
+
+        np.testing.assert_array_equal(store.get(0)[0], np.zeros(3))
+        assert store.dot_search([1.0, 0.0, 0.0])[0].value == pytest.approx(0.0)
+        assert store.euclidean_search([3.0, 4.0, 0.0])[0].value == pytest.approx(5.0)
 
     @pytest.mark.parametrize("non_finite", [np.nan, np.inf, -np.inf])
     def test_add_rejects_non_finite_vectors(self, non_finite):
@@ -303,6 +306,18 @@ class TestVectorStore:
 
         result = store.cosine_search([1e20, 1e20])[0]
 
+        assert result.value == pytest.approx(1.0)
+
+    def test_cosine_search_rejects_selected_zero_norm_stored_vectors(self):
+        """Test raw cosine search rejects selected zero vectors."""
+        store = VectorStore[str](dimensions=2, normalize=False)
+        store.add([[0.0, 0.0], [1.0, 0.0]], ["zero", "x"])
+
+        with pytest.raises(ValueError, match="zero-norm stored vectors"):
+            store.cosine_search([1.0, 0.0])
+
+        result = store.cosine_search([1.0, 0.0], within_rows=[1])[0]
+        assert result.index == 1
         assert result.value == pytest.approx(1.0)
 
     def test_dot_search_with_raw_vectors(self):
@@ -697,8 +712,8 @@ class TestVectorStore:
         finally:
             Path(file_path).unlink(missing_ok=True)
 
-    def test_load_raises_on_zero_norm_vectors_when_normalize_false(self):
-        """Test raw stores reject zero rows because cosine search is always available."""
+    def test_load_allows_zero_norm_vectors_when_normalize_false(self):
+        """Test raw stores load zero rows for dot and Euclidean search."""
         with tempfile.NamedTemporaryFile(suffix=".npz", delete=False) as tmp:
             file_path = tmp.name
 
@@ -710,8 +725,13 @@ class TestVectorStore:
             )
 
             store = VectorStore(dimensions=2, file_path=file_path, normalize=False)
-            with pytest.raises(ValueError, match="zero-norm"):
-                store.load()
+            store.load()
+
+            np.testing.assert_array_equal(store.get(0)[0], np.zeros(2))
+            assert store.dot_search([1.0, 0.0])[0].value == pytest.approx(0.0)
+            assert store.euclidean_search([3.0, 4.0])[0].value == pytest.approx(5.0)
+            with pytest.raises(ValueError, match="zero-norm stored vectors"):
+                store.cosine_search([1.0, 0.0])
         finally:
             Path(file_path).unlink(missing_ok=True)
 
