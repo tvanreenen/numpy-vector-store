@@ -383,11 +383,8 @@ class VectorStore(Generic[TMetadata]):
         )
 
     def _normalize_within_rows(
-        self, within_rows: Sequence[int] | npt.NDArray[np.integer[Any]] | None
+        self, within_rows: Sequence[int] | npt.NDArray[np.integer[Any]]
     ) -> npt.NDArray[np.intp]:
-        if within_rows is None:
-            return np.arange(len(self.vectors), dtype=np.intp)
-
         rows = np.asarray(within_rows)
         if rows.ndim != 1:
             raise ValueError("within_rows must be a 1D sequence of row indexes")
@@ -425,11 +422,15 @@ class VectorStore(Generic[TMetadata]):
         if len(self.vectors) == 0:
             return []
 
-        row_indices = self._normalize_within_rows(within_rows)
-        if len(row_indices) == 0:
-            return []
+        row_indices = None
+        selected_vectors = self.vectors
+        if within_rows is not None:
+            row_indices = self._normalize_within_rows(within_rows)
+            if len(row_indices) == 0:
+                return []
+            selected_vectors = self.vectors[row_indices]
 
-        values = values_fn(query_vector, self.vectors[row_indices])
+        values = values_fn(query_vector, selected_vectors)
 
         valid_local_indices = np.arange(len(values))
         if min_value is not None:
@@ -464,7 +465,9 @@ class VectorStore(Generic[TMetadata]):
 
         top_valid_sorted = top_valid_unsorted[sort_order]
         local_indices = valid_local_indices[top_valid_sorted]
-        original_indices = row_indices[local_indices]
+        original_indices = (
+            local_indices if row_indices is None else row_indices[local_indices]
+        )
 
         return [
             VectorHit(

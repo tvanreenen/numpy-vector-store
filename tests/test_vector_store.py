@@ -464,6 +464,28 @@ class TestVectorStore:
         assert [hit.index for hit in dot_results] == [2, 1]
         assert [hit.index for hit in euclidean_results] == [1, 2]
 
+    def test_unfiltered_metric_search_uses_stored_vector_matrix(self):
+        """Test an unfiltered search does not copy the complete vector matrix."""
+        store = VectorStore[int](dimensions=2, normalize=False)
+        store.add([[1.0, 0.0], [0.0, 1.0], [1.0, 1.0]], [0, 1, 2])
+        received_vectors = []
+
+        def capture_vectors(query, vectors):
+            received_vectors.append(vectors)
+            return np.arange(len(vectors), dtype=np.float32)
+
+        store._metric_search(
+            [1.0, 0.0],
+            top_k=1,
+            within_rows=None,
+            values_fn=capture_vectors,
+            descending=True,
+            min_value=None,
+            max_value=None,
+        )
+
+        assert received_vectors[0] is store.vectors
+
     def test_metric_searches_validate_common_inputs(self):
         """Test added search methods share common validation behavior."""
         store = VectorStore(dimensions=2)
