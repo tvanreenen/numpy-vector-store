@@ -244,6 +244,18 @@ counts, finite vector values, and zero-norm behavior before changing in-memory
 state. Opaque metadata values remain individual row payloads across persistence
 round trips.
 
+Each save writes a uniquely named temporary archive in the destination
+directory, closes it, and then replaces the destination with `os.replace`.
+Readers opening the destination path therefore see either the previous complete
+archive or the new complete archive rather than a partially written file. If
+writing or replacement fails, the previous destination remains in place and the
+temporary file is removed.
+
+Atomic replacement is not file locking or multi-writer coordination. Concurrent
+writers can still replace one another, and the library does not promise that a
+successful save has reached durable hardware storage across every operating
+system or power failure.
+
 Older archives containing only `vectors` and `metadata` remain readable in 0.4
 through the configuration-aware legacy API:
 
