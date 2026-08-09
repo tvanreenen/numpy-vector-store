@@ -9,6 +9,7 @@ from pathlib import Path
 import numpy as np
 import pytest
 
+import numpy_vector_store.vector_store as vector_store_module
 from numpy_vector_store import VectorHit, VectorStore
 
 
@@ -715,6 +716,70 @@ class TestVectorStore:
 
         assert not captured["temporary_path"].exists()
         assert len(VectorStore.open(file_path)) == 2
+
+    def test_save_write_failure_preserves_destination_and_cleans_temp(
+        self, tmp_path, monkeypatch
+    ):
+        """Test partial temporary writes cannot damage the current archive."""
+        file_path = tmp_path / "vectors.npz"
+        store = VectorStore[dict[str, str]](dimensions=2)
+        store.add([[1.0, 0.0]], [{"id": "persisted"}])
+        store.save(file_path)
+        original_archive = file_path.read_bytes()
+        store.add([[0.0, 1.0]], [{"id": "unsaved"}])
+
+        def fail_during_write(temporary_file, **values):
+            temporary_file.write(b"partial archive")
+            raise OSError("simulated archive write failure")
+
+        monkeypatch.setattr(np, "savez_compressed", fail_during_write)
+
+        with pytest.raises(OSError, match="simulated archive write failure"):
+            store.save()
+
+        assert file_path.read_bytes() == original_archive
+        assert list(tmp_path.glob(f".{file_path.name}.*.tmp")) == []
+
+    def test_save_replace_failure_preserves_destination_and_cleans_temp(
+        self, tmp_path, monkeypatch
+    ):
+        """Test a failed replace leaves the prior archive and no temporary file."""
+        file_path = tmp_path / "vectors.npz"
+        store = VectorStore[dict[str, str]](dimensions=2)
+        store.add([[1.0, 0.0]], [{"id": "persisted"}])
+        store.save(file_path)
+        original_archive = file_path.read_bytes()
+        captured = {}
+
+        def fail_during_replace(source, destination):
+            captured["temporary_path"] = Path(source)
+            assert captured["temporary_path"].exists()
+            raise PermissionError("simulated replace failure")
+
+        monkeypatch.setattr(os, "replace", fail_during_replace)
+
+        with pytest.raises(PermissionError, match="simulated replace failure"):
+            store.save()
+
+        assert file_path.read_bytes() == original_archive
+        assert not captured["temporary_path"].exists()
+
+    def test_temporary_name_collision_does_not_delete_existing_file(
+        self, tmp_path, monkeypatch
+    ):
+        """Test exclusive temporary creation never cleans up another file."""
+        file_path = tmp_path / "vectors.npz"
+        collision_path = tmp_path / f".{file_path.name}.collision.tmp"
+        collision_path.write_text("belongs to another process")
+        collision_id = type("CollisionId", (), {"hex": "collision"})()
+        monkeypatch.setattr(vector_store_module, "uuid4", lambda: collision_id)
+        store = VectorStore(dimensions=2)
+
+        with pytest.raises(FileExistsError):
+            store.save(file_path)
+
+        assert collision_path.read_text() == "belongs to another process"
+        assert not file_path.exists()
 
     def test_save_writes_versioned_persistence_contract(self):
         """Test saves contain the complete version 1 archive schema."""
