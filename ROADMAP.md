@@ -81,13 +81,46 @@ semantics will not change in this patch release.
 The persistence format currently stores only vectors and metadata. That format
 is compact, but callers must separately remember dimensions and normalization
 mode. A safer format should be self-describing and able to reject incompatible
-configuration instead of silently changing vector semantics.
+configuration instead of silently changing vector semantics. Version 0.4 will
+introduce that safer format and provide one deliberately short migration window
+for existing archives.
 
-Planned direction:
+### Versioned archive contract
 
-- Introduce a versioned archive containing its dimensions and normalization
-  mode.
-- Continue reading the existing two-array archive format.
+Every archive written by 0.4 will use format version 1 and contain five named
+values:
+
+- `format_version`: a scalar integer identifying version 1 of the archive
+  contract. This version is independent of the package version.
+- `dimensions`: a positive scalar integer matching the width of `vectors`.
+- `normalize`: a scalar boolean recording whether stored vectors use normalized
+  or raw semantics.
+- `vectors`: a two-dimensional `float32` array.
+- `metadata`: a one-dimensional object array with one payload per vector row.
+
+Opening an archive will validate the complete schema before changing live store
+state. Missing fields, unsupported format versions, invalid configuration, and
+inconsistent array shapes will fail clearly instead of being guessed at.
+
+Object metadata continues to rely on NumPy's pickle-backed object-array
+loading. Persistence therefore remains a trusted-file feature: users must not
+open archives from untrusted or unverifiable sources.
+
+### Existing archive migration
+
+Archives created before 0.4 contain only `vectors` and `metadata`, so they
+cannot recover their original dimensions and normalization mode by themselves.
+Version 0.4 will keep a temporary reader for these archives through the legacy
+configuration-aware API. Opening one will emit a `FutureWarning`, and its next
+save will rewrite it in the version 1 format.
+
+This legacy reader will be removed in 0.5. Users who need an old archive after
+upgrading should open and save it once with 0.4, or recreate it from its source
+data. The project intentionally does not promise indefinite compatibility for
+the incomplete two-array format.
+
+Additional planned work:
+
 - Write archives through a temporary file and replace the destination
   atomically.
 - Define the difference between initial loading and explicit reloading.
@@ -101,6 +134,8 @@ Repeated small additions also copy all previously stored data.
 
 Planned direction:
 
+- Remove the unversioned two-array archive reader after its 0.4 migration
+  window.
 - Keep vector storage behind private state.
 - Expose read-only views or snapshots for inspection.
 - Make row retrieval safe from accidental mutation.
