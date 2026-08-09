@@ -60,9 +60,19 @@ class VectorStore(Generic[TMetadata]):
 
         Args:
             dimensions: The number of dimensions for vectors to be stored.
-            file_path: Optional path to save/load vectors from.
+            file_path: Deprecated 0.4 compatibility path for `load()` and
+                context-manager persistence. Use `save(path)` or `open(path)`.
             normalize: Whether to store vectors normalized to unit length.
         """
+        if file_path is not None:
+            warnings.warn(
+                "VectorStore(..., file_path=...) is deprecated and will be removed "
+                "in 0.5. Create a store without a path and call save(path), or use "
+                "VectorStore.open(path).",
+                FutureWarning,
+                stacklevel=2,
+            )
+
         if dimensions <= 0:
             raise ValueError("dimensions must be greater than 0")
 
@@ -129,7 +139,15 @@ class VectorStore(Generic[TMetadata]):
         self.metadata = np.append(self.metadata, metadata_array)
 
     def load(self) -> None:
-        """Load vectors from file if file_path is specified and exists."""
+        """Deprecated 0.4 initial loader; use `open(path)` or `reload()`."""
+        warnings.warn(
+            "VectorStore.load() is deprecated and will be removed in 0.5. Use "
+            "VectorStore.open(path) for initial loading or reload() to refresh a "
+            "bound store.",
+            FutureWarning,
+            stacklevel=2,
+        )
+
         if self._loaded or not self.file_path:
             return
 
@@ -309,12 +327,19 @@ class VectorStore(Generic[TMetadata]):
         return len(self.vectors)
 
     def __enter__(self) -> VectorStore[TMetadata]:
-        """Enter the context manager."""
+        """Enter the deprecated persistence context manager."""
+        warnings.warn(
+            "Using VectorStore as a context manager is deprecated and will be "
+            "removed in 0.5. Call save(path), or save() on a bound store, "
+            "explicitly after successful work.",
+            FutureWarning,
+            stacklevel=2,
+        )
         return self
 
     def __exit__(self, exc_type: Any, exc_val: Any, exc_tb: Any) -> None:
-        """Exit the context manager, auto-save if file_path is specified."""
-        if self.file_path:
+        """Save after normal completion while the compatibility bridge remains."""
+        if exc_type is None and self.file_path:
             self.save()
 
     def _metadata_to_array(
