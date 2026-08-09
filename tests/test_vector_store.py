@@ -634,6 +634,49 @@ class TestVectorStore:
         assert len(store2) == 1
         assert store2.get(0)[1] == {"id": "test"}
 
+    def test_save_with_path_binds_an_unbound_store(self, tmp_path):
+        """Test the preferred first save writes and binds its destination."""
+        extensionless_path = tmp_path / "vectors"
+        expected_path = tmp_path / "vectors.npz"
+        store = VectorStore[dict[str, str]](dimensions=2)
+        store.add([[1.0, 0.0]], [{"id": "first"}])
+
+        store.save(path=extensionless_path)
+
+        assert store.file_path == expected_path
+        opened = VectorStore[dict[str, str]].open(expected_path)
+        assert opened.get(0)[1] == {"id": "first"}
+
+    def test_save_with_path_rebinds_after_successful_save_as(self, tmp_path):
+        """Test Save As binds the new path for later pathless saves."""
+        original_path = tmp_path / "original.npz"
+        copied_path = tmp_path / "copied.npz"
+        store = VectorStore[dict[str, str]](dimensions=2)
+        store.add([[1.0, 0.0]], [{"id": "original"}])
+        store.save(original_path)
+
+        store.add([[0.0, 1.0]], [{"id": "copied"}])
+        store.save(copied_path)
+        store.add([[1.0, 1.0]], [{"id": "later"}])
+        store.save()
+
+        assert store.file_path == copied_path
+        assert len(VectorStore.open(original_path)) == 1
+        assert len(VectorStore.open(copied_path)) == 3
+
+    def test_failed_save_as_preserves_existing_binding(self, tmp_path):
+        """Test a failed write cannot redirect later pathless saves."""
+        original_path = tmp_path / "original.npz"
+        invalid_path = tmp_path / "directory.npz"
+        invalid_path.mkdir()
+        store = VectorStore(dimensions=2)
+        store.save(original_path)
+
+        with pytest.raises(IsADirectoryError):
+            store.save(invalid_path)
+
+        assert store.file_path == original_path
+
     def test_save_writes_versioned_persistence_contract(self):
         """Test saves contain the complete version 1 archive schema."""
         with tempfile.NamedTemporaryFile(suffix=".npz", delete=False) as tmp:
@@ -686,6 +729,61 @@ class TestVectorStore:
 
         assert loaded.metadata.shape == (5,)
         assert loaded.metadata.tolist() == payloads
+
+    @pytest.mark.parametrize("normalize", [True, False])
+    def test_open_uses_versioned_archive_configuration(self, tmp_path, normalize):
+        """Test open constructs and binds a store from persisted configuration."""
+        file_path = tmp_path / "vectors.npz"
+        persisted = VectorStore[dict[str, str]](
+            dimensions=2,
+            file_path=file_path,
+            normalize=normalize,
+        )
+        persisted.add([[3.0, 4.0]], [{"id": "persisted"}])
+        persisted.save()
+
+        opened = VectorStore[dict[str, str]].open(path=file_path)
+
+        assert opened.dimensions == 2
+        assert opened.normalize is normalize
+        assert opened.file_path == file_path
+        assert len(opened) == 1
+        assert opened.get(0)[1] == {"id": "persisted"}
+        expected = np.array([0.6, 0.8]) if normalize else np.array([3.0, 4.0])
+        np.testing.assert_array_almost_equal(opened.get(0)[0], expected)
+
+    def test_open_resolves_extensionless_path(self, tmp_path):
+        """Test open uses the same extension resolution as save and load."""
+        extensionless_path = tmp_path / "vectors"
+        expected_path = tmp_path / "vectors.npz"
+        persisted = VectorStore(dimensions=2, file_path=extensionless_path)
+        persisted.save()
+
+        opened = VectorStore.open(extensionless_path)
+
+        assert opened.file_path == expected_path
+
+    def test_open_requires_an_existing_archive(self, tmp_path):
+        """Test open fails clearly when its resolved archive does not exist."""
+        with pytest.raises(FileNotFoundError):
+            VectorStore.open(tmp_path / "missing")
+
+    def test_open_rejects_empty_path(self):
+        """Test open requires a meaningful archive path."""
+        with pytest.raises(ValueError, match="path"):
+            VectorStore.open("")
+
+    def test_open_rejects_unversioned_archive(self, tmp_path):
+        """Test open directs legacy archives through the migration API."""
+        file_path = tmp_path / "legacy.npz"
+        np.savez_compressed(
+            file_path,
+            vectors=np.empty((0, 2), dtype=np.float32),
+            metadata=np.array([], dtype=object),
+        )
+
+        with pytest.raises(ValueError, match="legacy 0.4 API"):
+            VectorStore.open(file_path)
 
     def test_load_supports_minimal_format(self):
         """Test files with vectors and metadata load."""
@@ -985,6 +1083,64 @@ class TestVectorStore:
         assert len(store) == 1
         assert store.get(0)[1] == {"id": "persisted"}
 
+    def test_reload_refreshes_an_open_store(self, tmp_path):
+        """Test reload always replaces memory from the bound archive."""
+        file_path = tmp_path / "vectors.npz"
+        persisted = VectorStore[dict[str, str]](dimensions=2)
+        persisted.add([[1.0, 0.0]], [{"id": "first"}])
+        persisted.save(file_path)
+        opened = VectorStore[dict[str, str]].open(file_path)
+
+        persisted.add([[0.0, 1.0]], [{"id": "second"}])
+        persisted.save()
+        opened.add([[1.0, 1.0]], [{"id": "memory-only"}])
+        opened.reload()
+
+        assert len(opened) == 2
+        assert opened.metadata.tolist() == [{"id": "first"}, {"id": "second"}]
+
+    def test_reload_requires_a_bound_path(self):
+        """Test reload rejects stores that have never been opened or saved."""
+        store = VectorStore(dimensions=2)
+
+        with pytest.raises(ValueError, match="bound file path"):
+            store.reload()
+
+    def test_reload_missing_file_preserves_in_memory_state(self, tmp_path):
+        """Test strict reload raises without discarding rows when a file is gone."""
+        file_path = tmp_path / "vectors.npz"
+        store = VectorStore[dict[str, str]](dimensions=2)
+        store.add([[1.0, 0.0]], [{"id": "persisted"}])
+        store.save(file_path)
+        file_path.unlink()
+
+        with pytest.raises(FileNotFoundError):
+            store.reload()
+
+        assert len(store) == 1
+        assert store.get(0)[1] == {"id": "persisted"}
+
+    def test_reload_invalid_archive_preserves_in_memory_state(self, tmp_path):
+        """Test strict reload validates before changing the current rows."""
+        file_path = tmp_path / "vectors.npz"
+        store = VectorStore[dict[str, str]](dimensions=2)
+        store.add([[1.0, 0.0]], [{"id": "persisted"}])
+        store.save(file_path)
+        np.savez_compressed(
+            file_path,
+            format_version=np.array(1, dtype=np.int64),
+            dimensions=np.array(2, dtype=np.int64),
+            normalize=np.array(True, dtype=np.bool_),
+            vectors=np.array([[1.0, 0.0]], dtype=np.float32),
+            metadata=np.array([], dtype=object),
+        )
+
+        with pytest.raises(ValueError, match="length mismatch"):
+            store.reload()
+
+        assert len(store) == 1
+        assert store.get(0)[1] == {"id": "persisted"}
+
     def test_load_raises_on_vector_dimension_mismatch(self):
         """Test load fails fast when persisted vector dimensions don't match store."""
         with tempfile.NamedTemporaryFile(suffix=".npz", delete=False) as tmp:
@@ -1163,11 +1319,19 @@ class TestVectorStore:
             Path(file_path).unlink(missing_ok=True)
 
     def test_save_no_file_path(self):
-        """Test save with no file path."""
+        """Test save requires a path when the store is not yet bound."""
         store = VectorStore(dimensions=2)
         add_single_vector(store, np.array([1.0, 2.0]), {"id": "test"})
 
-        store.save()
+        with pytest.raises(ValueError, match="unbound store"):
+            store.save()
+
+    def test_save_rejects_empty_file_path(self):
+        """Test an explicit empty path cannot bind a store."""
+        store = VectorStore(dimensions=2)
+
+        with pytest.raises(ValueError, match="file path"):
+            store.save("")
 
     def test_save_empty_vectors(self):
         """Test save with empty vectors."""
