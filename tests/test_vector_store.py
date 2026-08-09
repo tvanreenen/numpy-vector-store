@@ -16,6 +16,9 @@ from numpy_vector_store import VectorHit, VectorStore
 pytestmark = [
     pytest.mark.filterwarnings("ignore:.*file_path.*deprecated.*:FutureWarning"),
     pytest.mark.filterwarnings("ignore:VectorStore.load.*deprecated.*:FutureWarning"),
+    pytest.mark.filterwarnings(
+        "ignore:Using VectorStore as a context manager.*:FutureWarning"
+    ),
 ]
 
 
@@ -1161,6 +1164,32 @@ class TestVectorStore:
         with VectorStore(dimensions=2) as store:
             add_single_vector(store, np.array([1.0, 2.0]), {"id": "no_file_test"})
             assert len(store.vectors) == 1
+
+    def test_context_manager_warns_with_explicit_save_alternative(self):
+        """Test context usage directs users to an explicit successful save."""
+        store = VectorStore(dimensions=2)
+
+        with pytest.warns(FutureWarning, match=r"save\(path\).+successful"):
+            with store:
+                pass
+
+    def test_context_manager_exception_propagates_without_saving(self, tmp_path):
+        """Test failed managed work cannot overwrite the bound destination."""
+        file_path = tmp_path / "vectors.npz"
+        persisted = VectorStore[dict[str, str]](dimensions=2)
+        persisted.add([[1.0, 0.0]], [{"id": "persisted"}])
+        persisted.save(file_path)
+        store = VectorStore[dict[str, str]](dimensions=2, file_path=file_path)
+
+        with pytest.warns(FutureWarning, match="context manager"):
+            with pytest.raises(RuntimeError, match="simulated failure"):
+                with store:
+                    store.add([[0.0, 1.0]], [{"id": "not-persisted"}])
+                    raise RuntimeError("simulated failure")
+
+        opened = VectorStore[dict[str, str]].open(file_path)
+        assert len(opened) == 1
+        assert opened.get(0)[1] == {"id": "persisted"}
 
     def test_load_file_not_exists(self):
         """Test loading when file doesn't exist."""

@@ -326,12 +326,19 @@ class VectorStore(Generic[TMetadata]):
         return len(self.vectors)
 
     def __enter__(self) -> VectorStore[TMetadata]:
-        """Enter the context manager."""
+        """Enter the deprecated persistence context manager."""
+        warnings.warn(
+            "Using VectorStore as a context manager is deprecated and will be "
+            "removed in 0.5. Call save(path), or save() on a bound store, "
+            "explicitly after successful work.",
+            FutureWarning,
+            stacklevel=2,
+        )
         return self
 
     def __exit__(self, exc_type: Any, exc_val: Any, exc_tb: Any) -> None:
-        """Exit the context manager, auto-save if file_path is specified."""
-        if self.file_path:
+        """Save after normal completion while the compatibility bridge remains."""
+        if exc_type is None and self.file_path:
             self.save()
 
     def _metadata_to_array(
