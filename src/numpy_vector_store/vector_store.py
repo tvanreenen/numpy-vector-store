@@ -1,10 +1,12 @@
 from __future__ import annotations
 
+import os
 import warnings
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Generic, TypeVar
+from uuid import uuid4
 
 import numpy as np
 import numpy.typing as npt
@@ -158,14 +160,7 @@ class VectorStore(Generic[TMetadata]):
         if destination is None:
             raise ValueError("save() requires a file path for an unbound store")
 
-        np.savez_compressed(
-            destination,
-            format_version=np.array(_ARCHIVE_FORMAT_VERSION, dtype=np.int64),
-            dimensions=np.array(self.dimensions, dtype=np.int64),
-            normalize=np.array(self.normalize, dtype=np.bool_),
-            vectors=self.vectors.astype(np.float32, copy=False),
-            metadata=np.array(self.metadata, copy=True),
-        )
+        self._write_archive(destination)
         self.file_path = destination
 
     def cosine_search(
@@ -598,6 +593,25 @@ class VectorStore(Generic[TMetadata]):
         self.vectors = loaded_vectors
         self.metadata = archive.metadata
         self._loaded = True
+
+    def _write_archive(self, destination: Path) -> None:
+        temporary_path = destination.with_name(f".{destination.name}.{uuid4().hex}.tmp")
+        temporary_created = False
+        try:
+            with temporary_path.open("xb") as temporary_file:
+                temporary_created = True
+                np.savez_compressed(
+                    temporary_file,
+                    format_version=np.array(_ARCHIVE_FORMAT_VERSION, dtype=np.int64),
+                    dimensions=np.array(self.dimensions, dtype=np.int64),
+                    normalize=np.array(self.normalize, dtype=np.bool_),
+                    vectors=self.vectors.astype(np.float32, copy=False),
+                    metadata=np.array(self.metadata, copy=True),
+                )
+            os.replace(temporary_path, destination)
+        finally:
+            if temporary_created:
+                temporary_path.unlink(missing_ok=True)
 
     @staticmethod
     def _validate_archive_fields(files: set[str]) -> None:

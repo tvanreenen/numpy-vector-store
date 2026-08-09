@@ -1,5 +1,6 @@
 """Tests for the VectorStore class."""
 
+import os
 import tempfile
 import warnings
 from dataclasses import dataclass
@@ -676,6 +677,44 @@ class TestVectorStore:
             store.save(invalid_path)
 
         assert store.file_path == original_path
+
+    def test_save_replaces_from_closed_same_directory_archive(
+        self, tmp_path, monkeypatch
+    ):
+        """Test save closes a complete local temporary archive before replace."""
+        file_path = tmp_path / "vectors.npz"
+        store = VectorStore[dict[str, str]](dimensions=2)
+        store.add([[1.0, 0.0]], [{"id": "first"}])
+        store.save(file_path)
+        store.add([[0.0, 1.0]], [{"id": "second"}])
+        original_savez = np.savez_compressed
+        original_replace = os.replace
+        captured = {}
+
+        def capture_temporary_file(temporary_file, **values):
+            captured["file"] = temporary_file
+            original_savez(temporary_file, **values)
+
+        def inspect_then_replace(source, destination):
+            source_path = Path(source)
+            destination_path = Path(destination)
+            assert captured["file"].closed
+            assert source_path.parent == destination_path.parent == tmp_path
+            assert source_path != destination_path
+            with np.load(source_path, allow_pickle=True) as temporary_data:
+                assert len(temporary_data["vectors"]) == 2
+            with np.load(destination_path, allow_pickle=True) as current_data:
+                assert len(current_data["vectors"]) == 1
+            captured["temporary_path"] = source_path
+            original_replace(source_path, destination_path)
+
+        monkeypatch.setattr(np, "savez_compressed", capture_temporary_file)
+        monkeypatch.setattr(os, "replace", inspect_then_replace)
+
+        store.save()
+
+        assert not captured["temporary_path"].exists()
+        assert len(VectorStore.open(file_path)) == 2
 
     def test_save_writes_versioned_persistence_contract(self):
         """Test saves contain the complete version 1 archive schema."""
