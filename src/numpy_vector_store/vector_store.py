@@ -60,7 +60,8 @@ class VectorStore(Generic[TMetadata]):
 
         Args:
             dimensions: The number of dimensions for vectors to be stored.
-            file_path: Optional path to save/load vectors from.
+            file_path: Deprecated 0.4 compatibility path for `load()` and
+                context-manager persistence. Use `save(path)` or `open(path)`.
             normalize: Whether to store vectors normalized to unit length.
         """
         if file_path is not None:
@@ -138,7 +139,7 @@ class VectorStore(Generic[TMetadata]):
         self.metadata = np.append(self.metadata, metadata_array)
 
     def load(self) -> None:
-        """Load vectors from file if file_path is specified and exists."""
+        """Deprecated 0.4 initial loader; use `open(path)` or `reload()`."""
         warnings.warn(
             "VectorStore.load() is deprecated and will be removed in 0.5. Use "
             "VectorStore.open(path) for initial loading or reload() to refresh a "
