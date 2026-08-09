@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import warnings
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 from pathlib import Path
@@ -9,6 +10,12 @@ import numpy as np
 import numpy.typing as npt
 
 TMetadata = TypeVar("TMetadata")
+
+_ARCHIVE_FORMAT_VERSION = 1
+_ARCHIVE_FIELDS = frozenset(
+    {"format_version", "dimensions", "normalize", "vectors", "metadata"}
+)
+_LEGACY_ARCHIVE_FIELDS = frozenset({"vectors", "metadata"})
 
 
 @dataclass(frozen=True, slots=True)
@@ -106,10 +113,38 @@ class VectorStore(Generic[TMetadata]):
 
         with np.load(self.file_path, allow_pickle=True) as data:
             files = set(data.files)
-            self._validate_required_fields(files)
-
-            loaded_vectors = self._to_float32_array(data["vectors"])
+            legacy = "format_version" not in files and files <= _LEGACY_ARCHIVE_FIELDS
+            versioned = not legacy
+            if legacy:
+                self._validate_legacy_archive_fields(files)
+            else:
+                if "format_version" not in files:
+                    raise ValueError(
+                        "Persisted vector store is missing fields: format_version"
+                    )
+                format_version = self._read_integer_scalar(
+                    data["format_version"], name="format_version"
+                )
+                if format_version != _ARCHIVE_FORMAT_VERSION:
+                    raise ValueError(
+                        "Unsupported vector store archive format version: "
+                        f"{format_version}"
+                    )
+                self._validate_archive_fields(files)
+                self._validate_archive_configuration(
+                    dimensions=self._read_integer_scalar(
+                        data["dimensions"], name="dimensions"
+                    ),
+                    normalize=self._read_boolean_scalar(
+                        data["normalize"], name="normalize"
+                    ),
+                )
+            persisted_vectors = np.array(data["vectors"], copy=True)
             loaded_metadata = np.array(data["metadata"], copy=True)
+
+        if versioned:
+            self._validate_archive_array_dtypes(persisted_vectors, loaded_metadata)
+        loaded_vectors = self._to_float32_array(persisted_vectors)
 
         self._validate_loaded_arrays(loaded_vectors, loaded_metadata)
         loaded_vectors = self._prepare_vectors_for_storage(
@@ -117,6 +152,15 @@ class VectorStore(Generic[TMetadata]):
             zero_norm_error_message="Loaded vectors contain zero-norm vectors",
             non_finite_error_message="Loaded vectors contain non-finite values",
         )
+
+        if legacy:
+            warnings.warn(
+                "Loading unversioned vector store archives is deprecated and will "
+                "be removed in 0.5. Save this store with 0.4 to migrate the archive "
+                "to format version 1.",
+                FutureWarning,
+                stacklevel=2,
+            )
 
         self.vectors = loaded_vectors
         self.metadata = loaded_metadata
@@ -129,6 +173,9 @@ class VectorStore(Generic[TMetadata]):
 
         np.savez_compressed(
             self.file_path,
+            format_version=np.array(_ARCHIVE_FORMAT_VERSION, dtype=np.int64),
+            dimensions=np.array(self.dimensions, dtype=np.int64),
+            normalize=np.array(self.normalize, dtype=np.bool_),
             vectors=self.vectors.astype(np.float32, copy=False),
             metadata=np.array(self.metadata, copy=True),
         )
@@ -480,11 +527,58 @@ class VectorStore(Generic[TMetadata]):
             )
         ]
 
-    def _validate_required_fields(self, files: set[str]) -> None:
-        if "vectors" not in files:
-            raise ValueError("Persisted vector store is missing vectors")
-        if "metadata" not in files:
-            raise ValueError("Persisted vector store is missing metadata")
+    def _validate_archive_fields(self, files: set[str]) -> None:
+        missing = _ARCHIVE_FIELDS - files
+        if missing:
+            names = ", ".join(sorted(missing))
+            raise ValueError(f"Persisted vector store is missing fields: {names}")
+
+        unexpected = files - _ARCHIVE_FIELDS
+        if unexpected:
+            names = ", ".join(sorted(unexpected))
+            raise ValueError(f"Persisted vector store has unexpected fields: {names}")
+
+    def _validate_legacy_archive_fields(self, files: set[str]) -> None:
+        missing = _LEGACY_ARCHIVE_FIELDS - files
+        if missing:
+            names = ", ".join(sorted(missing))
+            raise ValueError(f"Persisted vector store is missing fields: {names}")
+
+    def _read_integer_scalar(self, value: npt.NDArray[Any], *, name: str) -> int:
+        scalar = np.asarray(value)
+        if scalar.ndim != 0 or not np.issubdtype(scalar.dtype, np.integer):
+            raise ValueError(f"Persisted {name} must be a scalar integer")
+        return int(scalar.item())
+
+    def _read_boolean_scalar(self, value: npt.NDArray[Any], *, name: str) -> bool:
+        scalar = np.asarray(value)
+        if scalar.ndim != 0 or scalar.dtype != np.dtype(np.bool_):
+            raise ValueError(f"Persisted {name} must be a scalar boolean")
+        return bool(scalar.item())
+
+    def _validate_archive_configuration(
+        self, *, dimensions: int, normalize: bool
+    ) -> None:
+        if dimensions <= 0:
+            raise ValueError("Persisted dimensions must be greater than 0")
+        if dimensions != self.dimensions:
+            raise ValueError(
+                f"Persisted dimensions {dimensions} do not match store dimensions {self.dimensions}"
+            )
+        if normalize != self.normalize:
+            raise ValueError(
+                f"Persisted normalize setting {normalize} does not match store normalize setting {self.normalize}"
+            )
+
+    def _validate_archive_array_dtypes(
+        self,
+        loaded_vectors: npt.NDArray[Any],
+        loaded_metadata: npt.NDArray[Any],
+    ) -> None:
+        if loaded_vectors.dtype != np.dtype(np.float32):
+            raise ValueError("Persisted vectors must use the float32 dtype")
+        if loaded_metadata.dtype != np.dtype(object):
+            raise ValueError("Persisted metadata must use the object dtype")
 
     def _validate_loaded_arrays(
         self,
