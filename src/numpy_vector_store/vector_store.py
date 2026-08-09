@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import warnings
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 from pathlib import Path
@@ -112,7 +113,8 @@ class VectorStore(Generic[TMetadata]):
 
         with np.load(self.file_path, allow_pickle=True) as data:
             files = set(data.files)
-            versioned = files != _LEGACY_ARCHIVE_FIELDS
+            legacy = files == _LEGACY_ARCHIVE_FIELDS
+            versioned = not legacy
             if versioned:
                 self._validate_archive_fields(files)
                 self._validate_archive_configuration(
@@ -126,9 +128,6 @@ class VectorStore(Generic[TMetadata]):
                         data["normalize"], name="normalize"
                     ),
                 )
-            else:
-                self._validate_legacy_archive_fields(files)
-
             persisted_vectors = np.array(data["vectors"], copy=True)
             loaded_metadata = np.array(data["metadata"], copy=True)
 
@@ -142,6 +141,15 @@ class VectorStore(Generic[TMetadata]):
             zero_norm_error_message="Loaded vectors contain zero-norm vectors",
             non_finite_error_message="Loaded vectors contain non-finite values",
         )
+
+        if legacy:
+            warnings.warn(
+                "Loading unversioned vector store archives is deprecated and will "
+                "be removed in 0.5. Save this store with 0.4 to migrate the archive "
+                "to format version 1.",
+                FutureWarning,
+                stacklevel=2,
+            )
 
         self.vectors = loaded_vectors
         self.metadata = loaded_metadata
@@ -518,12 +526,6 @@ class VectorStore(Generic[TMetadata]):
         if unexpected:
             names = ", ".join(sorted(unexpected))
             raise ValueError(f"Persisted vector store has unexpected fields: {names}")
-
-    def _validate_legacy_archive_fields(self, files: set[str]) -> None:
-        missing = _LEGACY_ARCHIVE_FIELDS - files
-        if missing:
-            names = ", ".join(sorted(missing))
-            raise ValueError(f"Persisted vector store is missing fields: {names}")
 
     def _read_integer_scalar(self, value: npt.NDArray[Any], *, name: str) -> int:
         scalar = np.asarray(value)

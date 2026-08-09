@@ -700,12 +700,45 @@ class TestVectorStore:
             )
 
             store = VectorStore[dict[str, str]](dimensions=2, file_path=file_path)
-            store.load()
+            with pytest.warns(FutureWarning, match="format version 1"):
+                store.load()
 
             assert len(store) == 1
             assert store.get(0)[1] == {"id": "legacy"}
         finally:
             Path(file_path).unlink(missing_ok=True)
+
+    def test_save_migrates_loaded_legacy_archive(self, tmp_path):
+        """Test saving a legacy load rewrites it with the version 1 schema."""
+        file_path = tmp_path / "vectors.npz"
+        np.savez_compressed(
+            file_path,
+            vectors=np.array([[3.0, 4.0]], dtype=np.float32),
+            metadata=np.array([{"id": "legacy"}], dtype=object),
+        )
+        store = VectorStore[dict[str, str]](dimensions=2, file_path=file_path)
+
+        with pytest.warns(FutureWarning, match="removed in 0.5"):
+            store.load()
+        store.save()
+
+        with np.load(file_path, allow_pickle=True) as data:
+            assert set(data.files) == {
+                "format_version",
+                "dimensions",
+                "normalize",
+                "vectors",
+                "metadata",
+            }
+            assert data["format_version"].item() == 1
+            assert data["dimensions"].item() == 2
+            assert data["normalize"].item() is True
+
+        migrated = VectorStore[dict[str, str]](dimensions=2, file_path=file_path)
+        with warnings.catch_warnings():
+            warnings.simplefilter("error", FutureWarning)
+            migrated.load()
+        assert migrated.get(0)[1] == {"id": "legacy"}
 
     @pytest.mark.parametrize(
         ("target_dimensions", "target_normalize", "message"),
@@ -976,7 +1009,8 @@ class TestVectorStore:
             )
 
             store = VectorStore(dimensions=2, file_path=file_path)
-            store.load()
+            with pytest.warns(FutureWarning, match="format version 1"):
+                store.load()
 
             np.testing.assert_array_almost_equal(store.vectors[0], np.array([1.0, 0.0]))
             assert store.cosine_search([1.0, 0.0])[0].value == pytest.approx(1.0)
@@ -996,7 +1030,8 @@ class TestVectorStore:
             )
 
             store = VectorStore(dimensions=2, file_path=file_path, normalize=False)
-            store.load()
+            with pytest.warns(FutureWarning, match="format version 1"):
+                store.load()
 
             np.testing.assert_array_equal(store.vectors[0], np.array([2.0, 0.0]))
             assert store.cosine_search([1.0, 0.0])[0].value == pytest.approx(1.0)
@@ -1035,7 +1070,8 @@ class TestVectorStore:
             )
 
             store = VectorStore(dimensions=2, file_path=file_path, normalize=False)
-            store.load()
+            with pytest.warns(FutureWarning, match="format version 1"):
+                store.load()
 
             np.testing.assert_array_equal(store.get(0)[0], np.zeros(2))
             assert store.dot_search([1.0, 0.0])[0].value == pytest.approx(0.0)
