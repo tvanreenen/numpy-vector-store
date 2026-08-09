@@ -687,6 +687,61 @@ class TestVectorStore:
         assert loaded.metadata.shape == (5,)
         assert loaded.metadata.tolist() == payloads
 
+    @pytest.mark.parametrize("normalize", [True, False])
+    def test_open_uses_versioned_archive_configuration(self, tmp_path, normalize):
+        """Test open constructs and binds a store from persisted configuration."""
+        file_path = tmp_path / "vectors.npz"
+        persisted = VectorStore[dict[str, str]](
+            dimensions=2,
+            file_path=file_path,
+            normalize=normalize,
+        )
+        persisted.add([[3.0, 4.0]], [{"id": "persisted"}])
+        persisted.save()
+
+        opened = VectorStore[dict[str, str]].open(file_path)
+
+        assert opened.dimensions == 2
+        assert opened.normalize is normalize
+        assert opened.file_path == file_path
+        assert len(opened) == 1
+        assert opened.get(0)[1] == {"id": "persisted"}
+        expected = np.array([0.6, 0.8]) if normalize else np.array([3.0, 4.0])
+        np.testing.assert_array_almost_equal(opened.get(0)[0], expected)
+
+    def test_open_resolves_extensionless_path(self, tmp_path):
+        """Test open uses the same extension resolution as save and load."""
+        extensionless_path = tmp_path / "vectors"
+        expected_path = tmp_path / "vectors.npz"
+        persisted = VectorStore(dimensions=2, file_path=extensionless_path)
+        persisted.save()
+
+        opened = VectorStore.open(extensionless_path)
+
+        assert opened.file_path == expected_path
+
+    def test_open_requires_an_existing_archive(self, tmp_path):
+        """Test open fails clearly when its resolved archive does not exist."""
+        with pytest.raises(FileNotFoundError):
+            VectorStore.open(tmp_path / "missing")
+
+    def test_open_rejects_empty_path(self):
+        """Test open requires a meaningful archive path."""
+        with pytest.raises(ValueError, match="file_path"):
+            VectorStore.open("")
+
+    def test_open_rejects_unversioned_archive(self, tmp_path):
+        """Test open directs legacy archives through the migration API."""
+        file_path = tmp_path / "legacy.npz"
+        np.savez_compressed(
+            file_path,
+            vectors=np.empty((0, 2), dtype=np.float32),
+            metadata=np.array([], dtype=object),
+        )
+
+        with pytest.raises(ValueError, match="legacy 0.4 API"):
+            VectorStore.open(file_path)
+
     def test_load_supports_minimal_format(self):
         """Test files with vectors and metadata load."""
         with tempfile.NamedTemporaryFile(suffix=".npz", delete=False) as tmp:

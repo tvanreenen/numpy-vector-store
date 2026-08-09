@@ -19,6 +19,15 @@ _LEGACY_ARCHIVE_FIELDS = frozenset({"vectors", "metadata"})
 
 
 @dataclass(frozen=True, slots=True)
+class _LoadedArchive:
+    dimensions: int
+    normalize: bool
+    vectors: npt.NDArray[Any]
+    metadata: npt.NDArray[Any]
+    legacy: bool
+
+
+@dataclass(frozen=True, slots=True)
 class VectorHit(Generic[TMetadata]):
     """A typed vector-search result."""
 
@@ -62,6 +71,19 @@ class VectorStore(Generic[TMetadata]):
         )
         self._loaded = False
         self.metadata: npt.NDArray[Any] = np.array([], dtype=object)
+
+    @classmethod
+    def open(cls, file_path: str | Path) -> VectorStore[TMetadata]:
+        """Open a store from a versioned, self-describing archive."""
+        resolved_path = cls._resolve_file_path(file_path)
+        if resolved_path is None:
+            raise ValueError("file_path must not be empty")
+
+        archive = cls._read_archive(resolved_path)
+        store = cls(dimensions=archive.dimensions, normalize=archive.normalize)
+        store.file_path = resolved_path
+        store._replace_with_archive(archive)
+        return store
 
     def add(
         self, vectors: npt.ArrayLike, metadata: Sequence[TMetadata] | npt.NDArray[Any]
@@ -111,60 +133,12 @@ class VectorStore(Generic[TMetadata]):
         if not self.file_path.exists():
             return
 
-        with np.load(self.file_path, allow_pickle=True) as data:
-            files = set(data.files)
-            legacy = "format_version" not in files and files <= _LEGACY_ARCHIVE_FIELDS
-            versioned = not legacy
-            if legacy:
-                self._validate_legacy_archive_fields(files)
-            else:
-                if "format_version" not in files:
-                    raise ValueError(
-                        "Persisted vector store is missing fields: format_version"
-                    )
-                format_version = self._read_integer_scalar(
-                    data["format_version"], name="format_version"
-                )
-                if format_version != _ARCHIVE_FORMAT_VERSION:
-                    raise ValueError(
-                        "Unsupported vector store archive format version: "
-                        f"{format_version}"
-                    )
-                self._validate_archive_fields(files)
-                self._validate_archive_configuration(
-                    dimensions=self._read_integer_scalar(
-                        data["dimensions"], name="dimensions"
-                    ),
-                    normalize=self._read_boolean_scalar(
-                        data["normalize"], name="normalize"
-                    ),
-                )
-            persisted_vectors = np.array(data["vectors"], copy=True)
-            loaded_metadata = np.array(data["metadata"], copy=True)
-
-        if versioned:
-            self._validate_archive_array_dtypes(persisted_vectors, loaded_metadata)
-        loaded_vectors = self._to_float32_array(persisted_vectors)
-
-        self._validate_loaded_arrays(loaded_vectors, loaded_metadata)
-        loaded_vectors = self._prepare_vectors_for_storage(
-            loaded_vectors,
-            zero_norm_error_message="Loaded vectors contain zero-norm vectors",
-            non_finite_error_message="Loaded vectors contain non-finite values",
+        archive = self._read_archive(
+            self.file_path,
+            legacy_dimensions=self.dimensions,
+            legacy_normalize=self.normalize,
         )
-
-        if legacy:
-            warnings.warn(
-                "Loading unversioned vector store archives is deprecated and will "
-                "be removed in 0.5. Save this store with 0.4 to migrate the archive "
-                "to format version 1.",
-                FutureWarning,
-                stacklevel=2,
-            )
-
-        self.vectors = loaded_vectors
-        self.metadata = loaded_metadata
-        self._loaded = True
+        self._replace_with_archive(archive)
 
     def save(self) -> None:
         """Save vectors and metadata if file_path is specified."""
@@ -344,7 +318,8 @@ class VectorStore(Generic[TMetadata]):
             metadata_array[index] = payload
         return metadata_array
 
-    def _resolve_file_path(self, file_path: str | Path | None) -> Path | None:
+    @staticmethod
+    def _resolve_file_path(file_path: str | Path | None) -> Path | None:
         if not file_path:
             return None
 
@@ -527,7 +502,91 @@ class VectorStore(Generic[TMetadata]):
             )
         ]
 
-    def _validate_archive_fields(self, files: set[str]) -> None:
+    @classmethod
+    def _read_archive(
+        cls,
+        file_path: Path,
+        *,
+        legacy_dimensions: int | None = None,
+        legacy_normalize: bool | None = None,
+    ) -> _LoadedArchive:
+        with np.load(file_path, allow_pickle=True) as data:
+            files = set(data.files)
+            legacy = "format_version" not in files and files <= _LEGACY_ARCHIVE_FIELDS
+            if legacy:
+                cls._validate_legacy_archive_fields(files)
+                if legacy_dimensions is None or legacy_normalize is None:
+                    raise ValueError(
+                        "Unversioned vector store archives cannot be opened without "
+                        "dimensions and normalize configuration. Load and save this "
+                        "archive with the legacy 0.4 API before using open()."
+                    )
+                dimensions = legacy_dimensions
+                normalize = legacy_normalize
+            else:
+                if "format_version" not in files:
+                    raise ValueError(
+                        "Persisted vector store is missing fields: format_version"
+                    )
+                format_version = cls._read_integer_scalar(
+                    data["format_version"], name="format_version"
+                )
+                if format_version != _ARCHIVE_FORMAT_VERSION:
+                    raise ValueError(
+                        "Unsupported vector store archive format version: "
+                        f"{format_version}"
+                    )
+                cls._validate_archive_fields(files)
+                dimensions = cls._read_integer_scalar(
+                    data["dimensions"], name="dimensions"
+                )
+                normalize = cls._read_boolean_scalar(
+                    data["normalize"], name="normalize"
+                )
+                if dimensions <= 0:
+                    raise ValueError("Persisted dimensions must be greater than 0")
+
+            persisted_vectors = np.array(data["vectors"], copy=True)
+            loaded_metadata = np.array(data["metadata"], copy=True)
+
+        if not legacy:
+            cls._validate_archive_array_dtypes(persisted_vectors, loaded_metadata)
+        return _LoadedArchive(
+            dimensions=dimensions,
+            normalize=normalize,
+            vectors=persisted_vectors,
+            metadata=loaded_metadata,
+            legacy=legacy,
+        )
+
+    def _replace_with_archive(self, archive: _LoadedArchive) -> None:
+        self._validate_archive_configuration(
+            dimensions=archive.dimensions,
+            normalize=archive.normalize,
+        )
+        loaded_vectors = self._to_float32_array(archive.vectors)
+        self._validate_loaded_arrays(loaded_vectors, archive.metadata)
+        loaded_vectors = self._prepare_vectors_for_storage(
+            loaded_vectors,
+            zero_norm_error_message="Loaded vectors contain zero-norm vectors",
+            non_finite_error_message="Loaded vectors contain non-finite values",
+        )
+
+        if archive.legacy:
+            warnings.warn(
+                "Loading unversioned vector store archives is deprecated and will "
+                "be removed in 0.5. Save this store with 0.4 to migrate the archive "
+                "to format version 1.",
+                FutureWarning,
+                stacklevel=3,
+            )
+
+        self.vectors = loaded_vectors
+        self.metadata = archive.metadata
+        self._loaded = True
+
+    @staticmethod
+    def _validate_archive_fields(files: set[str]) -> None:
         missing = _ARCHIVE_FIELDS - files
         if missing:
             names = ", ".join(sorted(missing))
@@ -538,19 +597,22 @@ class VectorStore(Generic[TMetadata]):
             names = ", ".join(sorted(unexpected))
             raise ValueError(f"Persisted vector store has unexpected fields: {names}")
 
-    def _validate_legacy_archive_fields(self, files: set[str]) -> None:
+    @staticmethod
+    def _validate_legacy_archive_fields(files: set[str]) -> None:
         missing = _LEGACY_ARCHIVE_FIELDS - files
         if missing:
             names = ", ".join(sorted(missing))
             raise ValueError(f"Persisted vector store is missing fields: {names}")
 
-    def _read_integer_scalar(self, value: npt.NDArray[Any], *, name: str) -> int:
+    @staticmethod
+    def _read_integer_scalar(value: npt.NDArray[Any], *, name: str) -> int:
         scalar = np.asarray(value)
         if scalar.ndim != 0 or not np.issubdtype(scalar.dtype, np.integer):
             raise ValueError(f"Persisted {name} must be a scalar integer")
         return int(scalar.item())
 
-    def _read_boolean_scalar(self, value: npt.NDArray[Any], *, name: str) -> bool:
+    @staticmethod
+    def _read_boolean_scalar(value: npt.NDArray[Any], *, name: str) -> bool:
         scalar = np.asarray(value)
         if scalar.ndim != 0 or scalar.dtype != np.dtype(np.bool_):
             raise ValueError(f"Persisted {name} must be a scalar boolean")
@@ -570,8 +632,8 @@ class VectorStore(Generic[TMetadata]):
                 f"Persisted normalize setting {normalize} does not match store normalize setting {self.normalize}"
             )
 
+    @staticmethod
     def _validate_archive_array_dtypes(
-        self,
         loaded_vectors: npt.NDArray[Any],
         loaded_metadata: npt.NDArray[Any],
     ) -> None:
