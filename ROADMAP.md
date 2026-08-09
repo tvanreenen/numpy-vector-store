@@ -36,9 +36,10 @@ compatibility contract and are exercised in CI. The project generally:
 - Drops a Python version only in a minor release and calls out the change in
   release notes.
 
-The 0.3 series supports Python 3.10 through 3.14. Python 3.10 reaches upstream
-end-of-life in October 2026 and is expected to be removed in 0.4.0 rather than
-in a 0.3 patch release.
+The 0.3 series supports Python 3.10 through 3.14. Version 0.4 supports Python
+3.11 through 3.14, using the minor-release boundary to remove Python 3.10 ahead
+of its upstream end-of-life in October 2026. NumPy 1.23.2 is the minimum for
+0.4 because it is the earliest NumPy release that supports Python 3.11.
 
 Supported NumPy versions are also part of the runtime contract. The declared
 minimum should be installable on the oldest supported Python version and should
