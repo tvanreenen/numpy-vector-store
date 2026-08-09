@@ -113,14 +113,25 @@ class VectorStore(Generic[TMetadata]):
 
         with np.load(self.file_path, allow_pickle=True) as data:
             files = set(data.files)
-            legacy = files == _LEGACY_ARCHIVE_FIELDS
+            legacy = "format_version" not in files and files <= _LEGACY_ARCHIVE_FIELDS
             versioned = not legacy
-            if versioned:
+            if legacy:
+                self._validate_legacy_archive_fields(files)
+            else:
+                if "format_version" not in files:
+                    raise ValueError(
+                        "Persisted vector store is missing fields: format_version"
+                    )
+                format_version = self._read_integer_scalar(
+                    data["format_version"], name="format_version"
+                )
+                if format_version != _ARCHIVE_FORMAT_VERSION:
+                    raise ValueError(
+                        "Unsupported vector store archive format version: "
+                        f"{format_version}"
+                    )
                 self._validate_archive_fields(files)
                 self._validate_archive_configuration(
-                    format_version=self._read_integer_scalar(
-                        data["format_version"], name="format_version"
-                    ),
                     dimensions=self._read_integer_scalar(
                         data["dimensions"], name="dimensions"
                     ),
@@ -527,6 +538,12 @@ class VectorStore(Generic[TMetadata]):
             names = ", ".join(sorted(unexpected))
             raise ValueError(f"Persisted vector store has unexpected fields: {names}")
 
+    def _validate_legacy_archive_fields(self, files: set[str]) -> None:
+        missing = _LEGACY_ARCHIVE_FIELDS - files
+        if missing:
+            names = ", ".join(sorted(missing))
+            raise ValueError(f"Persisted vector store is missing fields: {names}")
+
     def _read_integer_scalar(self, value: npt.NDArray[Any], *, name: str) -> int:
         scalar = np.asarray(value)
         if scalar.ndim != 0 or not np.issubdtype(scalar.dtype, np.integer):
@@ -540,12 +557,8 @@ class VectorStore(Generic[TMetadata]):
         return bool(scalar.item())
 
     def _validate_archive_configuration(
-        self, *, format_version: int, dimensions: int, normalize: bool
+        self, *, dimensions: int, normalize: bool
     ) -> None:
-        if format_version != _ARCHIVE_FORMAT_VERSION:
-            raise ValueError(
-                f"Unsupported vector store archive format version: {format_version}"
-            )
         if dimensions <= 0:
             raise ValueError("Persisted dimensions must be greater than 0")
         if dimensions != self.dimensions:

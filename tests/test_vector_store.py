@@ -784,6 +784,23 @@ class TestVectorStore:
         with pytest.raises(ValueError, match="format version: 2"):
             store.load()
 
+    def test_unknown_archive_version_is_checked_before_its_fields(self, tmp_path):
+        """Test future-version fields do not obscure an unsupported version."""
+        file_path = tmp_path / "vectors.npz"
+        np.savez_compressed(
+            file_path,
+            format_version=np.array(2, dtype=np.int64),
+            dimensions=np.array(2, dtype=np.int64),
+            normalize=np.array(True, dtype=np.bool_),
+            vectors=np.empty((0, 2), dtype=np.float32),
+            metadata=np.array([], dtype=object),
+            future_configuration=np.array("value"),
+        )
+        store = VectorStore(dimensions=2, file_path=file_path)
+
+        with pytest.raises(ValueError, match="format version: 2"):
+            store.load()
+
     @pytest.mark.parametrize(
         ("field", "value", "message"),
         [
@@ -843,6 +860,28 @@ class TestVectorStore:
 
         with pytest.raises(ValueError, match=message):
             store.load()
+
+    def test_load_preserves_state_after_array_validation_failure(self, tmp_path):
+        """Test late archive validation cannot partially replace live rows."""
+        file_path = tmp_path / "vectors.npz"
+        np.savez_compressed(
+            file_path,
+            format_version=np.array(1, dtype=np.int64),
+            dimensions=np.array(2, dtype=np.int64),
+            normalize=np.array(True, dtype=np.bool_),
+            vectors=np.array([[1.0, 0.0], [0.0, 1.0]], dtype=np.float32),
+            metadata=np.array([{"id": "only-one"}], dtype=object),
+        )
+        store = VectorStore[dict[str, str]](dimensions=2, file_path=file_path)
+        store.add([[3.0, 4.0]], [{"id": "in-memory"}])
+        original_vectors = store.vectors.copy()
+        original_metadata = store.metadata.copy()
+
+        with pytest.raises(ValueError, match="length mismatch"):
+            store.load()
+
+        np.testing.assert_array_equal(store.vectors, original_vectors)
+        np.testing.assert_array_equal(store.metadata, original_metadata)
 
     def test_explicit_load_when_file_exists(self):
         """Test explicit loading when file exists."""
