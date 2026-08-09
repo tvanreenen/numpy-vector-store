@@ -7,7 +7,7 @@ name = "numpy-vector-store"
 dynamic = ["version"]
 description = "A fast, lightweight, and zero-setup in-memory vector store powered by NumPy"
 readme = "README.md"
-requires-python = ">=3.10"
+requires-python = ">=3.11"
 license = {text = "MIT"}
 authors = [
     {name = "Tim VanReenen"},
@@ -18,14 +18,13 @@ classifiers = [
     "Intended Audience :: Developers",
     "License :: OSI Approved :: MIT License",
     "Programming Language :: Python :: 3",
-    "Programming Language :: Python :: 3.10",
     "Programming Language :: Python :: 3.11",
     "Programming Language :: Python :: 3.12",
     "Programming Language :: Python :: 3.13",
     "Programming Language :: Python :: 3.14",
 ]
 dependencies = [
-    "numpy>=1.21.3",
+    "numpy>=1.23.2",
 ]
 
 
@@ -45,7 +44,7 @@ path = "src/numpy_vector_store/__init__.py"
 
 [tool.ruff]
 line-length = 88
-target-version = "py310"
+target-version = "py311"
 
 [tool.ruff.lint]
 select = [
@@ -66,7 +65,7 @@ ignore = [
 known-first-party = ["numpy_vector_store"]
 
 [tool.mypy]
-python_version = "3.10"
+python_version = "3.11"
 warn_return_any = true
 warn_unused_configs = true
 disallow_untyped_defs = true

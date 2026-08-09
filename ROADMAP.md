@@ -36,9 +36,10 @@ compatibility contract and are exercised in CI. The project generally:
 - Drops a Python version only in a minor release and calls out the change in
   release notes.
 
-The 0.3 series supports Python 3.10 through 3.14. Python 3.10 reaches upstream
-end-of-life in October 2026 and is expected to be removed in 0.4.0 rather than
-in a 0.3 patch release.
+The 0.3 series supports Python 3.10 through 3.14. Version 0.4 supports Python
+3.11 through 3.14, using the minor-release boundary to remove Python 3.10 ahead
+of its upstream end-of-life in October 2026. NumPy 1.23.2 is the minimum for
+0.4 because it is the earliest NumPy release that supports Python 3.11.
 
 Supported NumPy versions are also part of the runtime contract. The declared
 minimum should be installable on the oldest supported Python version and should
@@ -78,16 +79,17 @@ semantics will not change in this patch release.
 
 ## 0.4.0: Persistence and lifecycle
 
-The persistence format currently stores only vectors and metadata. That format
-is compact, but callers must separately remember dimensions and normalization
-mode. A safer format should be self-describing and able to reject incompatible
-configuration instead of silently changing vector semantics. Version 0.4 will
-introduce that safer format and provide one deliberately short migration window
-for existing archives.
+Status: complete
+
+The earlier persistence format stored only vectors and metadata. That format
+was compact, but callers had to separately remember dimensions and
+normalization mode. Version 0.4 introduces a self-describing format that can
+reject incompatible configuration instead of silently changing vector
+semantics, with one deliberately short migration window for existing archives.
 
 ### Versioned archive contract
 
-Every archive written by 0.4 will use format version 1 and contain five named
+Every archive written by 0.4 uses format version 1 and contains five named
 values:
 
 - `format_version`: a scalar integer identifying version 1 of the archive
@@ -98,9 +100,9 @@ values:
 - `vectors`: a two-dimensional `float32` array.
 - `metadata`: a one-dimensional object array with one payload per vector row.
 
-Opening an archive will validate the complete schema before changing live store
+Opening an archive validates the complete schema before changing live store
 state. Missing fields, unsupported format versions, invalid configuration, and
-inconsistent array shapes will fail clearly instead of being guessed at.
+inconsistent array shapes fail clearly instead of being guessed at.
 
 Object metadata continues to rely on NumPy's pickle-backed object-array
 loading. Persistence therefore remains a trusted-file feature: users must not
@@ -110,9 +112,9 @@ open archives from untrusted or unverifiable sources.
 
 Archives created before 0.4 contain only `vectors` and `metadata`, so they
 cannot recover their original dimensions and normalization mode by themselves.
-Version 0.4 will keep a temporary reader for these archives through the legacy
-configuration-aware API. Opening one will emit a `FutureWarning`, and its next
-save will rewrite it in the version 1 format.
+Version 0.4 keeps a temporary reader for these archives through the legacy
+configuration-aware API. Opening one emits a `FutureWarning`, and its next save
+rewrites it in the version 1 format.
 
 This legacy reader will be removed in 0.5. Users who need an old archive after
 upgrading should open and save it once with 0.4, or recreate it from its source
@@ -121,8 +123,8 @@ the incomplete two-array format.
 
 ### Preferred persistence API
 
-Version 0.4 will introduce the lifecycle intended to become the only
-persistence API in 0.5:
+Version 0.4 introduces the lifecycle intended to become the only persistence
+API in 0.5:
 
 ```python
 store = VectorStore(dimensions=1536, normalize=True)
@@ -134,8 +136,8 @@ store.reload()
 store.save()
 ```
 
-The constructor creates a new empty store and, in the final API, performs no
-disk I/O. `VectorStore.open(path)` creates a store from the archive's own
+The preferred constructor creates a new empty store and performs no disk I/O.
+`VectorStore.open(path)` creates a store from the archive's own
 configuration and binds that path. `save(path)` performs the first save or a
 Save As operation and binds the supplied path; later `save()` calls update that
 bound archive. `reload()` strictly refreshes a bound store from disk and leaves
@@ -148,30 +150,29 @@ an explicit type will use a descriptive application type such as
 
 ### Short API compatibility window
 
-The preferred API will coexist in 0.4 with three old entry points: constructor
-`file_path=`, instance `load()`, and direct context-manager use. Each will emit
-a `FutureWarning` in 0.4 and be removed in 0.5. This single-release bridge is
+The preferred API coexists in 0.4 with three old entry points: constructor
+`file_path=`, instance `load()`, and direct context-manager use. Each emits a
+`FutureWarning` in 0.4 and will be removed in 0.5. This single-release bridge is
 intended to make migration obvious without carrying two persistence models
 long term.
 
-While the deprecated context manager remains, it will save only after normal
-completion. If the managed block raises, the store will not save and the
-exception will propagate unchanged. No replacement autosave context manager is
+While the deprecated context manager remains, it saves only after normal
+completion. If the managed block raises, the store does not save and the
+exception propagates unchanged. No replacement autosave context manager is
 planned; explicit `save()` calls make the persistence boundary easier to see
 and reason about.
 
 ### Atomic save boundary
 
-Saving will write and close a temporary archive in the destination directory
-before replacing the destination with `os.replace`. Readers should therefore
-see either the previous complete archive or the new complete archive, and a
-failed write should leave the previous destination intact. Temporary files
-will be cleaned up after failures.
+Saving writes and closes a temporary archive in the destination directory
+before replacing the destination with `os.replace`. Readers therefore see
+either the previous complete archive or the new complete archive, and a failed
+write leaves the previous destination intact. Temporary files are cleaned up
+after failures.
 
 This is an atomic visibility guarantee, not a concurrency system. Version 0.4
-will not add file locking, coordinate multiple writers, or promise survival of
-every hardware or operating-system failure before data reaches durable
-storage.
+does not add file locking, coordinate multiple writers, or promise survival of
+every hardware or operating-system failure before data reaches durable storage.
 
 ## 0.5.0: State safety and ingestion
 
