@@ -81,17 +81,97 @@ semantics will not change in this patch release.
 The persistence format currently stores only vectors and metadata. That format
 is compact, but callers must separately remember dimensions and normalization
 mode. A safer format should be self-describing and able to reject incompatible
-configuration instead of silently changing vector semantics.
+configuration instead of silently changing vector semantics. Version 0.4 will
+introduce that safer format and provide one deliberately short migration window
+for existing archives.
 
-Planned direction:
+### Versioned archive contract
 
-- Introduce a versioned archive containing its dimensions and normalization
-  mode.
-- Continue reading the existing two-array archive format.
-- Write archives through a temporary file and replace the destination
-  atomically.
-- Define the difference between initial loading and explicit reloading.
-- Define whether context-manager exit saves after an exception.
+Every archive written by 0.4 will use format version 1 and contain five named
+values:
+
+- `format_version`: a scalar integer identifying version 1 of the archive
+  contract. This version is independent of the package version.
+- `dimensions`: a positive scalar integer matching the width of `vectors`.
+- `normalize`: a scalar boolean recording whether stored vectors use normalized
+  or raw semantics.
+- `vectors`: a two-dimensional `float32` array.
+- `metadata`: a one-dimensional object array with one payload per vector row.
+
+Opening an archive will validate the complete schema before changing live store
+state. Missing fields, unsupported format versions, invalid configuration, and
+inconsistent array shapes will fail clearly instead of being guessed at.
+
+Object metadata continues to rely on NumPy's pickle-backed object-array
+loading. Persistence therefore remains a trusted-file feature: users must not
+open archives from untrusted or unverifiable sources.
+
+### Existing archive migration
+
+Archives created before 0.4 contain only `vectors` and `metadata`, so they
+cannot recover their original dimensions and normalization mode by themselves.
+Version 0.4 will keep a temporary reader for these archives through the legacy
+configuration-aware API. Opening one will emit a `FutureWarning`, and its next
+save will rewrite it in the version 1 format.
+
+This legacy reader will be removed in 0.5. Users who need an old archive after
+upgrading should open and save it once with 0.4, or recreate it from its source
+data. The project intentionally does not promise indefinite compatibility for
+the incomplete two-array format.
+
+### Preferred persistence API
+
+Version 0.4 will introduce the lifecycle intended to become the only
+persistence API in 0.5:
+
+```python
+store = VectorStore(dimensions=1536, normalize=True)
+store.add(vectors, metadata)
+store.save("vectors.npz")
+
+store = VectorStore.open("vectors.npz")
+store.reload()
+store.save()
+```
+
+The constructor creates a new empty store and, in the final API, performs no
+disk I/O. `VectorStore.open(path)` creates a store from the archive's own
+configuration and binds that path. `save(path)` performs the first save or a
+Save As operation and binds the supplied path; later `save()` calls update that
+bound archive. `reload()` strictly refreshes a bound store from disk and leaves
+the current in-memory state unchanged if reading or validation fails.
+
+The generic parameter on `VectorStore` describes the application's metadata
+payload type, not a built-in document abstraction. Examples that benefit from
+an explicit type will use a descriptive application type such as
+`ChunkMetadata`; otherwise they will omit the generic annotation.
+
+### Short API compatibility window
+
+The preferred API will coexist in 0.4 with three old entry points: constructor
+`file_path=`, instance `load()`, and direct context-manager use. Each will emit
+a `FutureWarning` in 0.4 and be removed in 0.5. This single-release bridge is
+intended to make migration obvious without carrying two persistence models
+long term.
+
+While the deprecated context manager remains, it will save only after normal
+completion. If the managed block raises, the store will not save and the
+exception will propagate unchanged. No replacement autosave context manager is
+planned; explicit `save()` calls make the persistence boundary easier to see
+and reason about.
+
+### Atomic save boundary
+
+Saving will write and close a temporary archive in the destination directory
+before replacing the destination with `os.replace`. Readers should therefore
+see either the previous complete archive or the new complete archive, and a
+failed write should leave the previous destination intact. Temporary files
+will be cleaned up after failures.
+
+This is an atomic visibility guarantee, not a concurrency system. Version 0.4
+will not add file locking, coordinate multiple writers, or promise survival of
+every hardware or operating-system failure before data reaches durable
+storage.
 
 ## 0.5.0: State safety and ingestion
 
@@ -101,6 +181,10 @@ Repeated small additions also copy all previously stored data.
 
 Planned direction:
 
+- Remove the unversioned two-array archive reader after its 0.4 migration
+  window.
+- Remove constructor `file_path=`, instance `load()`, and direct
+  context-manager persistence after their 0.4 warning window.
 - Keep vector storage behind private state.
 - Expose read-only views or snapshots for inspection.
 - Make row retrieval safe from accidental mutation.
