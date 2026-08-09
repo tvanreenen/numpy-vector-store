@@ -140,6 +140,18 @@ class VectorStore(Generic[TMetadata]):
         )
         self._replace_with_archive(archive)
 
+    def reload(self) -> None:
+        """Refresh this store from its bound archive path."""
+        if self.file_path is None:
+            raise ValueError("reload() requires a bound file path")
+
+        archive = self._read_archive(
+            self.file_path,
+            legacy_dimensions=self.dimensions,
+            legacy_normalize=self.normalize,
+        )
+        self._replace_with_archive(archive)
+
     def save(self, file_path: str | Path | None = None) -> None:
         """Save the store and bind an explicitly supplied destination path."""
         destination = (

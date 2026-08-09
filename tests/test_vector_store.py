@@ -1083,6 +1083,64 @@ class TestVectorStore:
         assert len(store) == 1
         assert store.get(0)[1] == {"id": "persisted"}
 
+    def test_reload_refreshes_an_open_store(self, tmp_path):
+        """Test reload always replaces memory from the bound archive."""
+        file_path = tmp_path / "vectors.npz"
+        persisted = VectorStore[dict[str, str]](dimensions=2)
+        persisted.add([[1.0, 0.0]], [{"id": "first"}])
+        persisted.save(file_path)
+        opened = VectorStore[dict[str, str]].open(file_path)
+
+        persisted.add([[0.0, 1.0]], [{"id": "second"}])
+        persisted.save()
+        opened.add([[1.0, 1.0]], [{"id": "memory-only"}])
+        opened.reload()
+
+        assert len(opened) == 2
+        assert opened.metadata.tolist() == [{"id": "first"}, {"id": "second"}]
+
+    def test_reload_requires_a_bound_path(self):
+        """Test reload rejects stores that have never been opened or saved."""
+        store = VectorStore(dimensions=2)
+
+        with pytest.raises(ValueError, match="bound file path"):
+            store.reload()
+
+    def test_reload_missing_file_preserves_in_memory_state(self, tmp_path):
+        """Test strict reload raises without discarding rows when a file is gone."""
+        file_path = tmp_path / "vectors.npz"
+        store = VectorStore[dict[str, str]](dimensions=2)
+        store.add([[1.0, 0.0]], [{"id": "persisted"}])
+        store.save(file_path)
+        file_path.unlink()
+
+        with pytest.raises(FileNotFoundError):
+            store.reload()
+
+        assert len(store) == 1
+        assert store.get(0)[1] == {"id": "persisted"}
+
+    def test_reload_invalid_archive_preserves_in_memory_state(self, tmp_path):
+        """Test strict reload validates before changing the current rows."""
+        file_path = tmp_path / "vectors.npz"
+        store = VectorStore[dict[str, str]](dimensions=2)
+        store.add([[1.0, 0.0]], [{"id": "persisted"}])
+        store.save(file_path)
+        np.savez_compressed(
+            file_path,
+            format_version=np.array(1, dtype=np.int64),
+            dimensions=np.array(2, dtype=np.int64),
+            normalize=np.array(True, dtype=np.bool_),
+            vectors=np.array([[1.0, 0.0]], dtype=np.float32),
+            metadata=np.array([], dtype=object),
+        )
+
+        with pytest.raises(ValueError, match="length mismatch"):
+            store.reload()
+
+        assert len(store) == 1
+        assert store.get(0)[1] == {"id": "persisted"}
+
     def test_load_raises_on_vector_dimension_mismatch(self):
         """Test load fails fast when persisted vector dimensions don't match store."""
         with tempfile.NamedTemporaryFile(suffix=".npz", delete=False) as tmp:
