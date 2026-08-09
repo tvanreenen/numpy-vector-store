@@ -13,6 +13,11 @@ import pytest
 import numpy_vector_store.vector_store as vector_store_module
 from numpy_vector_store import VectorHit, VectorStore
 
+pytestmark = [
+    pytest.mark.filterwarnings("ignore:.*file_path.*deprecated.*:FutureWarning"),
+    pytest.mark.filterwarnings("ignore:VectorStore.load.*deprecated.*:FutureWarning"),
+]
+
 
 @dataclass
 class MetadataRecord:
@@ -49,6 +54,26 @@ class TestVectorStore:
         """Test VectorStore rejects invalid dimensions."""
         with pytest.raises(ValueError, match="dimensions"):
             VectorStore(dimensions=0)
+
+    def test_constructor_file_path_warns_with_preferred_alternatives(self, tmp_path):
+        """Test constructor path binding points users to the preferred API."""
+        with pytest.warns(FutureWarning, match=r"save\(path\).+open\(path\)"):
+            store = VectorStore(dimensions=2, file_path=tmp_path / "vectors.npz")
+
+        assert store.file_path == tmp_path / "vectors.npz"
+
+    def test_constructor_without_file_path_does_not_warn(self):
+        """Test the preferred empty-store constructor remains warning-free."""
+        with warnings.catch_warnings():
+            warnings.simplefilter("error", FutureWarning)
+            VectorStore(dimensions=2)
+
+    def test_instance_load_warns_with_open_and_reload_alternatives(self):
+        """Test load points users to initial opening and explicit refreshing."""
+        store = VectorStore(dimensions=2)
+
+        with pytest.warns(FutureWarning, match=r"open\(path\).+reload\(\)"):
+            store.load()
 
     def test_add_preferred_api(self):
         """Test adding vectors with the preferred add API."""
@@ -949,10 +974,9 @@ class TestVectorStore:
             assert data["dimensions"].item() == 2
             assert data["normalize"].item() is True
 
-        migrated = VectorStore[dict[str, str]](dimensions=2, file_path=file_path)
         with warnings.catch_warnings():
             warnings.simplefilter("error", FutureWarning)
-            migrated.load()
+            migrated = VectorStore[dict[str, str]].open(file_path)
         assert migrated.get(0)[1] == {"id": "legacy"}
 
     @pytest.mark.parametrize(
