@@ -634,8 +634,8 @@ class TestVectorStore:
         assert len(store2) == 1
         assert store2.get(0)[1] == {"id": "test"}
 
-    def test_save_writes_minimal_persistence_contract(self):
-        """Test saves contain only vectors and metadata arrays."""
+    def test_save_writes_versioned_persistence_contract(self):
+        """Test saves contain the complete version 1 archive schema."""
         with tempfile.NamedTemporaryFile(suffix=".npz", delete=False) as tmp:
             file_path = tmp.name
 
@@ -645,8 +645,21 @@ class TestVectorStore:
             store.save()
 
             with np.load(file_path, allow_pickle=True) as data:
-                assert set(data.files) == {"vectors", "metadata"}
+                assert set(data.files) == {
+                    "format_version",
+                    "dimensions",
+                    "normalize",
+                    "vectors",
+                    "metadata",
+                }
+                assert data["format_version"].shape == ()
+                assert data["format_version"].item() == 1
+                assert data["dimensions"].shape == ()
+                assert data["dimensions"].item() == 2
+                assert data["normalize"].shape == ()
+                assert data["normalize"].item() is True
                 assert data["vectors"].dtype == np.float32
+                assert data["metadata"].dtype == np.dtype(object)
                 assert data["metadata"][0] == {"id": "test"}
         finally:
             Path(file_path).unlink(missing_ok=True)
@@ -693,6 +706,110 @@ class TestVectorStore:
             assert store.get(0)[1] == {"id": "legacy"}
         finally:
             Path(file_path).unlink(missing_ok=True)
+
+    @pytest.mark.parametrize(
+        ("target_dimensions", "target_normalize", "message"),
+        [(3, True, "dimensions"), (2, False, "normalize")],
+    )
+    def test_load_rejects_versioned_configuration_mismatch(
+        self, tmp_path, target_dimensions, target_normalize, message
+    ):
+        """Test archive configuration cannot silently change store semantics."""
+        file_path = tmp_path / "vectors.npz"
+        persisted = VectorStore(dimensions=2, file_path=file_path)
+        persisted.add([[1.0, 0.0]], [{"id": "persisted"}])
+        persisted.save()
+        store = VectorStore(
+            dimensions=target_dimensions,
+            file_path=file_path,
+            normalize=target_normalize,
+        )
+        store.add(
+            [np.ones(target_dimensions, dtype=np.float32)],
+            [{"id": "in-memory"}],
+        )
+
+        with pytest.raises(ValueError, match=message):
+            store.load()
+
+        assert len(store) == 1
+        assert store.get(0)[1] == {"id": "in-memory"}
+
+    def test_load_rejects_unknown_archive_version(self, tmp_path):
+        """Test unknown archive versions fail instead of being guessed at."""
+        file_path = tmp_path / "vectors.npz"
+        np.savez_compressed(
+            file_path,
+            format_version=np.array(2, dtype=np.int64),
+            dimensions=np.array(2, dtype=np.int64),
+            normalize=np.array(True, dtype=np.bool_),
+            vectors=np.empty((0, 2), dtype=np.float32),
+            metadata=np.array([], dtype=object),
+        )
+        store = VectorStore(dimensions=2, file_path=file_path)
+
+        with pytest.raises(ValueError, match="format version: 2"):
+            store.load()
+
+    @pytest.mark.parametrize(
+        ("field", "value", "message"),
+        [
+            ("format_version", np.array([1], dtype=np.int64), "scalar integer"),
+            ("dimensions", np.array(2.0), "scalar integer"),
+            ("normalize", np.array(1, dtype=np.int64), "scalar boolean"),
+        ],
+    )
+    def test_load_rejects_malformed_archive_configuration(
+        self, tmp_path, field, value, message
+    ):
+        """Test versioned configuration values use their documented types."""
+        file_path = tmp_path / "vectors.npz"
+        archive = {
+            "format_version": np.array(1, dtype=np.int64),
+            "dimensions": np.array(2, dtype=np.int64),
+            "normalize": np.array(True, dtype=np.bool_),
+            "vectors": np.empty((0, 2), dtype=np.float32),
+            "metadata": np.array([], dtype=object),
+        }
+        archive[field] = value
+        np.savez_compressed(file_path, **archive)
+        store = VectorStore(dimensions=2, file_path=file_path)
+
+        with pytest.raises(ValueError, match=message):
+            store.load()
+
+    @pytest.mark.parametrize(
+        ("vectors", "metadata", "message"),
+        [
+            (
+                np.empty((0, 2), dtype=np.float64),
+                np.array([], dtype=object),
+                "float32",
+            ),
+            (
+                np.empty((0, 2), dtype=np.float32),
+                np.array([], dtype=np.int64),
+                "object dtype",
+            ),
+        ],
+    )
+    def test_load_rejects_malformed_archive_array_dtypes(
+        self, tmp_path, vectors, metadata, message
+    ):
+        """Test versioned arrays use their documented storage dtypes."""
+        file_path = tmp_path / "vectors.npz"
+        np.savez_compressed(
+            file_path,
+            format_version=np.array(1, dtype=np.int64),
+            dimensions=np.array(2, dtype=np.int64),
+            normalize=np.array(True, dtype=np.bool_),
+            vectors=vectors,
+            metadata=metadata,
+        )
+        store = VectorStore(dimensions=2, file_path=file_path)
+
+        with pytest.raises(ValueError, match=message):
+            store.load()
 
     def test_explicit_load_when_file_exists(self):
         """Test explicit loading when file exists."""
@@ -1019,7 +1136,9 @@ class TestVectorStore:
             store1.save()
 
             with np.load(file_path, allow_pickle=True) as data:
-                assert set(data.files) == {"vectors", "metadata"}
+                assert data["format_version"].item() == 1
+                assert data["dimensions"].item() == 2
+                assert data["normalize"].item() is False
                 np.testing.assert_array_equal(data["vectors"][0], np.array([3.0, 4.0]))
 
             store2 = VectorStore(dimensions=2, file_path=file_path, normalize=False)
