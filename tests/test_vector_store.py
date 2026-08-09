@@ -641,7 +641,7 @@ class TestVectorStore:
         store = VectorStore[dict[str, str]](dimensions=2)
         store.add([[1.0, 0.0]], [{"id": "first"}])
 
-        store.save(extensionless_path)
+        store.save(path=extensionless_path)
 
         assert store.file_path == expected_path
         opened = VectorStore[dict[str, str]].open(expected_path)
@@ -742,7 +742,7 @@ class TestVectorStore:
         persisted.add([[3.0, 4.0]], [{"id": "persisted"}])
         persisted.save()
 
-        opened = VectorStore[dict[str, str]].open(file_path)
+        opened = VectorStore[dict[str, str]].open(path=file_path)
 
         assert opened.dimensions == 2
         assert opened.normalize is normalize
@@ -770,7 +770,7 @@ class TestVectorStore:
 
     def test_open_rejects_empty_path(self):
         """Test open requires a meaningful archive path."""
-        with pytest.raises(ValueError, match="file_path"):
+        with pytest.raises(ValueError, match="path"):
             VectorStore.open("")
 
     def test_open_rejects_unversioned_archive(self, tmp_path):

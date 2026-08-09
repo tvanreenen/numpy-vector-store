@@ -73,11 +73,11 @@ class VectorStore(Generic[TMetadata]):
         self.metadata: npt.NDArray[Any] = np.array([], dtype=object)
 
     @classmethod
-    def open(cls, file_path: str | Path) -> VectorStore[TMetadata]:
+    def open(cls, path: str | Path) -> VectorStore[TMetadata]:
         """Open a store from a versioned, self-describing archive."""
-        resolved_path = cls._resolve_file_path(file_path)
+        resolved_path = cls._resolve_file_path(path)
         if resolved_path is None:
-            raise ValueError("file_path must not be empty")
+            raise ValueError("path must not be empty")
 
         archive = cls._read_archive(resolved_path)
         store = cls(dimensions=archive.dimensions, normalize=archive.normalize)
@@ -152,11 +152,9 @@ class VectorStore(Generic[TMetadata]):
         )
         self._replace_with_archive(archive)
 
-    def save(self, file_path: str | Path | None = None) -> None:
+    def save(self, path: str | Path | None = None) -> None:
         """Save the store and bind an explicitly supplied destination path."""
-        destination = (
-            self.file_path if file_path is None else self._resolve_file_path(file_path)
-        )
+        destination = self.file_path if path is None else self._resolve_file_path(path)
         if destination is None:
             raise ValueError("save() requires a file path for an unbound store")
 
