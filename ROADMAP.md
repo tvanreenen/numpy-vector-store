@@ -119,12 +119,59 @@ upgrading should open and save it once with 0.4, or recreate it from its source
 data. The project intentionally does not promise indefinite compatibility for
 the incomplete two-array format.
 
-Additional planned work:
+### Preferred persistence API
 
-- Write archives through a temporary file and replace the destination
-  atomically.
-- Define the difference between initial loading and explicit reloading.
-- Define whether context-manager exit saves after an exception.
+Version 0.4 will introduce the lifecycle intended to become the only
+persistence API in 0.5:
+
+```python
+store = VectorStore(dimensions=1536, normalize=True)
+store.add(vectors, metadata)
+store.save("vectors.npz")
+
+store = VectorStore.open("vectors.npz")
+store.reload()
+store.save()
+```
+
+The constructor creates a new empty store and, in the final API, performs no
+disk I/O. `VectorStore.open(path)` creates a store from the archive's own
+configuration and binds that path. `save(path)` performs the first save or a
+Save As operation and binds the supplied path; later `save()` calls update that
+bound archive. `reload()` strictly refreshes a bound store from disk and leaves
+the current in-memory state unchanged if reading or validation fails.
+
+The generic parameter on `VectorStore` describes the application's metadata
+payload type, not a built-in document abstraction. Examples that benefit from
+an explicit type will use a descriptive application type such as
+`ChunkMetadata`; otherwise they will omit the generic annotation.
+
+### Short API compatibility window
+
+The preferred API will coexist in 0.4 with three old entry points: constructor
+`file_path=`, instance `load()`, and direct context-manager use. Each will emit
+a `FutureWarning` in 0.4 and be removed in 0.5. This single-release bridge is
+intended to make migration obvious without carrying two persistence models
+long term.
+
+While the deprecated context manager remains, it will save only after normal
+completion. If the managed block raises, the store will not save and the
+exception will propagate unchanged. No replacement autosave context manager is
+planned; explicit `save()` calls make the persistence boundary easier to see
+and reason about.
+
+### Atomic save boundary
+
+Saving will write and close a temporary archive in the destination directory
+before replacing the destination with `os.replace`. Readers should therefore
+see either the previous complete archive or the new complete archive, and a
+failed write should leave the previous destination intact. Temporary files
+will be cleaned up after failures.
+
+This is an atomic visibility guarantee, not a concurrency system. Version 0.4
+will not add file locking, coordinate multiple writers, or promise survival of
+every hardware or operating-system failure before data reaches durable
+storage.
 
 ## 0.5.0: State safety and ingestion
 
@@ -136,6 +183,8 @@ Planned direction:
 
 - Remove the unversioned two-array archive reader after its 0.4 migration
   window.
+- Remove constructor `file_path=`, instance `load()`, and direct
+  context-manager persistence after their 0.4 warning window.
 - Keep vector storage behind private state.
 - Expose read-only views or snapshots for inspection.
 - Make row retrieval safe from accidental mutation.
