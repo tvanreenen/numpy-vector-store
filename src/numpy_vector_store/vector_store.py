@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import os
+import stat
 import warnings
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass
@@ -595,6 +596,11 @@ class VectorStore(Generic[TMetadata]):
         self._loaded = True
 
     def _write_archive(self, destination: Path) -> None:
+        try:
+            destination_mode = stat.S_IMODE(destination.stat().st_mode)
+        except FileNotFoundError:
+            destination_mode = None
+
         temporary_path = destination.with_name(f".{destination.name}.{uuid4().hex}.tmp")
         temporary_created = False
         try:
@@ -608,6 +614,8 @@ class VectorStore(Generic[TMetadata]):
                     vectors=self.vectors.astype(np.float32, copy=False),
                     metadata=np.array(self.metadata, copy=True),
                 )
+            if destination_mode is not None:
+                temporary_path.chmod(destination_mode)
             os.replace(temporary_path, destination)
         finally:
             if temporary_created:

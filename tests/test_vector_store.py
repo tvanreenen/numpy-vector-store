@@ -1,6 +1,7 @@
 """Tests for the VectorStore class."""
 
 import os
+import stat
 import tempfile
 import warnings
 from dataclasses import dataclass
@@ -780,6 +781,18 @@ class TestVectorStore:
 
         assert collision_path.read_text() == "belongs to another process"
         assert not file_path.exists()
+
+    def test_atomic_save_preserves_existing_file_permissions(self, tmp_path):
+        """Test replacement does not broaden a destination's permission bits."""
+        file_path = tmp_path / "vectors.npz"
+        store = VectorStore(dimensions=2)
+        store.save(file_path)
+        file_path.chmod(0o640)
+        store.add([[1.0, 0.0]], [{"id": "updated"}])
+
+        store.save()
+
+        assert stat.S_IMODE(file_path.stat().st_mode) == 0o640
 
     def test_save_writes_versioned_persistence_contract(self):
         """Test saves contain the complete version 1 archive schema."""
