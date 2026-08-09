@@ -140,19 +140,23 @@ class VectorStore(Generic[TMetadata]):
         )
         self._replace_with_archive(archive)
 
-    def save(self) -> None:
-        """Save vectors and metadata if file_path is specified."""
-        if not self.file_path:
-            return
+    def save(self, file_path: str | Path | None = None) -> None:
+        """Save the store and bind an explicitly supplied destination path."""
+        destination = (
+            self.file_path if file_path is None else self._resolve_file_path(file_path)
+        )
+        if destination is None:
+            raise ValueError("save() requires a file path for an unbound store")
 
         np.savez_compressed(
-            self.file_path,
+            destination,
             format_version=np.array(_ARCHIVE_FORMAT_VERSION, dtype=np.int64),
             dimensions=np.array(self.dimensions, dtype=np.int64),
             normalize=np.array(self.normalize, dtype=np.bool_),
             vectors=self.vectors.astype(np.float32, copy=False),
             metadata=np.array(self.metadata, copy=True),
         )
+        self.file_path = destination
 
     def cosine_search(
         self,

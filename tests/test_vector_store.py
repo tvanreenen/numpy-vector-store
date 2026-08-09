@@ -634,6 +634,49 @@ class TestVectorStore:
         assert len(store2) == 1
         assert store2.get(0)[1] == {"id": "test"}
 
+    def test_save_with_path_binds_an_unbound_store(self, tmp_path):
+        """Test the preferred first save writes and binds its destination."""
+        extensionless_path = tmp_path / "vectors"
+        expected_path = tmp_path / "vectors.npz"
+        store = VectorStore[dict[str, str]](dimensions=2)
+        store.add([[1.0, 0.0]], [{"id": "first"}])
+
+        store.save(extensionless_path)
+
+        assert store.file_path == expected_path
+        opened = VectorStore[dict[str, str]].open(expected_path)
+        assert opened.get(0)[1] == {"id": "first"}
+
+    def test_save_with_path_rebinds_after_successful_save_as(self, tmp_path):
+        """Test Save As binds the new path for later pathless saves."""
+        original_path = tmp_path / "original.npz"
+        copied_path = tmp_path / "copied.npz"
+        store = VectorStore[dict[str, str]](dimensions=2)
+        store.add([[1.0, 0.0]], [{"id": "original"}])
+        store.save(original_path)
+
+        store.add([[0.0, 1.0]], [{"id": "copied"}])
+        store.save(copied_path)
+        store.add([[1.0, 1.0]], [{"id": "later"}])
+        store.save()
+
+        assert store.file_path == copied_path
+        assert len(VectorStore.open(original_path)) == 1
+        assert len(VectorStore.open(copied_path)) == 3
+
+    def test_failed_save_as_preserves_existing_binding(self, tmp_path):
+        """Test a failed write cannot redirect later pathless saves."""
+        original_path = tmp_path / "original.npz"
+        invalid_path = tmp_path / "directory.npz"
+        invalid_path.mkdir()
+        store = VectorStore(dimensions=2)
+        store.save(original_path)
+
+        with pytest.raises(IsADirectoryError):
+            store.save(invalid_path)
+
+        assert store.file_path == original_path
+
     def test_save_writes_versioned_persistence_contract(self):
         """Test saves contain the complete version 1 archive schema."""
         with tempfile.NamedTemporaryFile(suffix=".npz", delete=False) as tmp:
@@ -1218,11 +1261,19 @@ class TestVectorStore:
             Path(file_path).unlink(missing_ok=True)
 
     def test_save_no_file_path(self):
-        """Test save with no file path."""
+        """Test save requires a path when the store is not yet bound."""
         store = VectorStore(dimensions=2)
         add_single_vector(store, np.array([1.0, 2.0]), {"id": "test"})
 
-        store.save()
+        with pytest.raises(ValueError, match="unbound store"):
+            store.save()
+
+    def test_save_rejects_empty_file_path(self):
+        """Test an explicit empty path cannot bind a store."""
+        store = VectorStore(dimensions=2)
+
+        with pytest.raises(ValueError, match="file path"):
+            store.save("")
 
     def test_save_empty_vectors(self):
         """Test save with empty vectors."""
