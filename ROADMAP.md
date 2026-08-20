@@ -176,22 +176,72 @@ every hardware or operating-system failure before data reaches durable storage.
 
 ## 0.5.0: State safety and ingestion
 
-The current public NumPy arrays make inspection convenient, but they also let
-callers mutate normalized vectors and break internal search assumptions.
-Repeated small additions also copy all previously stored data.
+Status: in progress
 
-Planned direction:
+The 0.4 release established the persistence lifecycle and archive contract.
+Version 0.5 will finish that transition, then address a separate ownership
+problem: public arrays currently let callers change normalized vectors, resize
+row storage, or separate vectors from their metadata without validation.
 
-- Remove the unversioned two-array archive reader after its 0.4 migration
-  window.
-- Remove constructor `file_path=`, instance `load()`, and direct
-  context-manager persistence after their 0.4 warning window.
-- Keep vector storage behind private state.
-- Expose read-only views or snapshots for inspection.
-- Make row retrieval safe from accidental mutation.
-- Improve ingestion for repeated additions without penalizing batch insertion.
-- Define deterministic ordering for equal search values.
-- Document thread-safety guarantees and limitations.
+### Persistence bridge removal
+
+Version 0.5 will remove the four compatibility paths that warned throughout
+0.4:
+
+- Constructor `file_path=`. New stores use
+  `VectorStore(dimensions, normalize=...)`, then `save(path)`.
+- Instance `load()`. Existing version 1 archives use `VectorStore.open(path)`,
+  and an already-open store uses `reload()`.
+- Direct context-manager persistence. Explicit `save()` calls remain the only
+  persistence boundary.
+- The reader for unversioned archives containing only `vectors` and `metadata`.
+
+The archive format itself does not change. Version 0.5 continues to read and
+write format version 1. Anyone who still needs an unversioned archive must
+migrate it once with 0.4 using the archive's original dimensions and
+normalization mode, or recreate it from source data. Version 0.5 will not guess
+configuration that the old file did not record.
+
+The readable `file_path` attribute remains as the name of a store's current
+binding; removing the constructor argument does not require a second `path`
+convention. Only `open(path)` and a successful `save(path)` establish or change
+that binding.
+
+### Store-owned configuration and rows
+
+Version 0.5 will move configuration, path binding, vectors, and metadata behind
+private state. The existing public names remain available for inspection:
+
+- `dimensions`, `normalize`, and `file_path` become read-only properties.
+  Callers can inspect the store's configuration and binding but cannot bypass
+  the constructor, archive validation, or Save As behavior by assigning to
+  them.
+- `vectors` returns a read-only NumPy view over the active vector rows. Spare
+  ingestion capacity, if any, is never exposed.
+- `metadata` returns a read-only one-dimensional object-array view over the
+  active metadata rows.
+
+These array views describe the store at the time they are requested. Code that
+keeps a view across `add()`, `clear()`, or `reload()` must request a new view
+before assuming it represents current rows. The returned arrays reject element,
+shape, and ordering changes through the public reference.
+
+Read-only metadata protects the store's row structure, not the contents of an
+opaque Python payload. A dict, list, dataclass, or application object remains
+the same object supplied by the caller. The library will not deep-copy or
+freeze arbitrary metadata objects.
+
+### Safe row retrieval
+
+`get(index)` keeps its existing return shape: a `(vector, metadata)` tuple for a
+valid row and `None` for an index outside the store. The vector becomes an
+independent `float32` copy. Changing it cannot change the stored row, and later
+store operations cannot invalidate it.
+
+The metadata payload remains a shared opaque object, matching the behavior of
+search hits and the `metadata` view. This distinction avoids an expensive and
+often incorrect promise that the library knows how to copy application-defined
+objects.
 
 ## 0.6.0: API stabilization
 
