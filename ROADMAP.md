@@ -243,6 +243,73 @@ search hits and the `metadata` view. This distinction avoids an expensive and
 often incorrect promise that the library knows how to copy application-defined
 objects.
 
+### Amortized repeated ingestion
+
+The current implementation concatenates vectors and metadata on every
+noninitial `add()`. Repeated single-row additions therefore recopy all earlier
+rows each time, even though search ultimately needs one contiguous matrix.
+
+Version 0.5 will keep private contiguous vector and metadata storage with an
+active row count and spare capacity. When an incoming batch fits, `add()` writes
+it into available storage. When it does not fit, the store grows geometrically
+and copies active rows once. This makes repeated additions amortized instead of
+moving the full store for every call, while preserving efficient first and
+large-batch insertion.
+
+Capacity is an implementation detail. Public inspection, `len()`, search,
+`get()`, and persistence operate only on active rows. `clear()` returns the
+store to empty storage and releases retained row capacity rather than keeping
+references to application data indefinitely. The `add()` signature,
+normalization, validation, and metadata-row semantics do not change.
+
+Chunked storage is deliberately out of scope. It would make writes cheap by
+moving concatenation into search and persistence, or require a second cached
+representation with invalidation rules. One contiguous representation better
+fits a library whose primary operation is exact NumPy search.
+
+### Deterministic equal-value ordering
+
+Version 0.5 will define one ordering rule for exact metric ties:
+
+- Cosine and dot searches order larger values first.
+- Euclidean search orders smaller values first.
+- Rows with equal computed values are ordered by ascending original store row
+  index.
+
+The row-index tie break also determines which rows are included when equal
+values cross the `top_k` boundary. Filtered searches use the original store
+index rather than the position or order supplied through `within_rows`. Search
+results therefore remain reproducible without changing how non-tied values are
+ranked.
+
+### Thread-safety boundary
+
+`VectorStore` will not add internal locking in 0.5. Multiple threads may use
+search, `get()`, and the read-only inspection properties on the same instance
+while its state and metadata payloads remain unchanged.
+
+Applications must provide their own synchronization whenever another thread
+may call `add()`, `clear()`, `reload()`, or `save()`, or mutate a metadata
+payload shared with the store. This includes serializing a save with in-memory
+mutation so the archive cannot observe vectors and metadata at different
+logical moments.
+
+Atomic archive replacement remains a file-visibility guarantee, not an object
+or multi-writer lock. Separate stores writing the same destination can still
+replace one another, and the last successful replacement wins.
+
+### Explicit non-goals
+
+Version 0.5 will not add update or delete operations, a separate builder,
+streaming or async ingestion, internal locks, or multi-writer coordination. It
+will not deep-copy opaque metadata. These features are not needed to establish
+safe ownership and amortized addition, and adding them now would widen the API
+before the existing core reaches stabilization.
+
+State encapsulation and spare capacity do not change serialized data, so format
+version 1 remains sufficient. Broader validation and exception consistency stay
+in the 0.6 stabilization milestone.
+
 ## 0.6.0: API stabilization
 
 This release is intended to consolidate the earlier changes rather than add a
