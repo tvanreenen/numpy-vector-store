@@ -1,11 +1,12 @@
 from __future__ import annotations
 
+import operator
 import os
 import stat
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Generic, TypeVar
+from typing import Any, Generic, SupportsIndex, TypeVar
 from uuid import uuid4
 
 import numpy as np
@@ -47,9 +48,9 @@ class VectorStore(Generic[TMetadata]):
 
     def __init__(
         self,
-        dimensions: int,
+        dimensions: SupportsIndex,
         *,
-        normalize: bool = True,
+        normalize: bool | np.bool_ = True,
     ) -> None:
         """
         Initialize the vector store.
@@ -58,8 +59,10 @@ class VectorStore(Generic[TMetadata]):
             dimensions: The number of dimensions for vectors to be stored.
             normalize: Whether to store vectors normalized to unit length.
         """
+        dimensions = self._validate_integer(dimensions, name="dimensions")
         if dimensions <= 0:
             raise ValueError("dimensions must be greater than 0")
+        normalize = self._validate_boolean(normalize, name="normalize")
 
         self._dimensions = dimensions
         self._file_path: Path | None = None
@@ -390,6 +393,21 @@ class VectorStore(Generic[TMetadata]):
         if path.suffix != ".npz":
             return Path(f"{path}.npz")
         return path
+
+    @staticmethod
+    def _validate_integer(value: SupportsIndex, *, name: str) -> int:
+        if isinstance(value, (bool, np.bool_)):
+            raise TypeError(f"{name} must be an integer")
+        try:
+            return operator.index(value)
+        except TypeError:
+            raise TypeError(f"{name} must be an integer") from None
+
+    @staticmethod
+    def _validate_boolean(value: bool | np.bool_, *, name: str) -> bool:
+        if not isinstance(value, (bool, np.bool_)):
+            raise TypeError(f"{name} must be a boolean")
+        return bool(value)
 
     def _to_float32_array(self, values: npt.ArrayLike) -> npt.NDArray[np.float32]:
         with np.errstate(over="ignore", invalid="ignore"):

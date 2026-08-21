@@ -39,16 +39,32 @@ class TestVectorStore:
         assert len(store.vectors) == 0
         assert len(store) == 0
 
-    def test_init_allows_raw_vector_storage(self):
-        """Test VectorStore can preserve raw vectors."""
-        store = VectorStore(dimensions=3, normalize=False)
+    @pytest.mark.parametrize("normalize", [False, np.bool_(False)])
+    def test_init_allows_raw_vector_storage(self, normalize):
+        """Test VectorStore canonicalizes supported boolean configuration."""
+        store = VectorStore(dimensions=np.int64(3), normalize=normalize)
 
+        assert type(store.dimensions) is int
+        assert type(store.normalize) is bool
         assert store.normalize is False
 
-    def test_init_rejects_non_positive_dimensions(self):
+    @pytest.mark.parametrize("dimensions", [0, -1, np.int64(0)])
+    def test_init_rejects_non_positive_dimensions(self, dimensions):
         """Test VectorStore rejects invalid dimensions."""
         with pytest.raises(ValueError, match="dimensions"):
-            VectorStore(dimensions=0)
+            VectorStore(dimensions=dimensions)
+
+    @pytest.mark.parametrize("dimensions", [True, np.bool_(True), 2.0, "2"])
+    def test_init_rejects_non_integer_dimensions(self, dimensions):
+        """Test dimensions require integer rather than boolean semantics."""
+        with pytest.raises(TypeError, match="dimensions must be an integer"):
+            VectorStore(dimensions=dimensions)
+
+    @pytest.mark.parametrize("normalize", [0, 1, None, "false"])
+    def test_init_rejects_non_boolean_normalize(self, normalize):
+        """Test normalize cannot change meaning through truth-value coercion."""
+        with pytest.raises(TypeError, match="normalize must be a boolean"):
+            VectorStore(dimensions=2, normalize=normalize)
 
     @pytest.mark.parametrize(
         ("name", "value"),
