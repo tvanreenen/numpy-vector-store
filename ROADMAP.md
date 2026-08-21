@@ -176,16 +176,16 @@ every hardware or operating-system failure before data reaches durable storage.
 
 ## 0.5.0: State safety and ingestion
 
-Status: in progress
+Status: complete
 
 The 0.4 release established the persistence lifecycle and archive contract.
-Version 0.5 will finish that transition, then address a separate ownership
-problem: public arrays currently let callers change normalized vectors, resize
-row storage, or separate vectors from their metadata without validation.
+Version 0.5 finishes that transition and addresses a separate ownership
+problem: public arrays previously let callers change normalized vectors,
+resize row storage, or separate vectors from their metadata without validation.
 
 ### API at a glance
 
-The intended public surface remains small. Most 0.4 call sites continue to work
+The public surface remains small. Most 0.4 call sites continue to work
 unchanged:
 
 ```python
@@ -243,7 +243,7 @@ a document, state, snapshot, builder, or storage class.
 
 ### Persistence bridge removal
 
-Version 0.5 will remove the four compatibility paths that warned throughout
+Version 0.5 removes the four compatibility paths that warned throughout
 0.4:
 
 - Constructor `file_path=`. New stores use
@@ -257,7 +257,7 @@ Version 0.5 will remove the four compatibility paths that warned throughout
 The archive format itself does not change. Version 0.5 continues to read and
 write format version 1. Anyone who still needs an unversioned archive must
 migrate it once with 0.4 using the archive's original dimensions and
-normalization mode, or recreate it from source data. Version 0.5 will not guess
+normalization mode, or recreate it from source data. Version 0.5 does not guess
 configuration that the old file did not record.
 
 The readable `file_path` attribute remains as the name of a store's current
@@ -267,10 +267,10 @@ that binding.
 
 ### Store-owned configuration and rows
 
-Version 0.5 will move configuration, path binding, vectors, and metadata behind
+Version 0.5 moves configuration, path binding, vectors, and metadata behind
 private state. The existing public names remain available for inspection:
 
-- `dimensions`, `normalize`, and `file_path` become read-only properties.
+- `dimensions`, `normalize`, and `file_path` are read-only properties.
   Callers can inspect the store's configuration and binding but cannot bypass
   the constructor, archive validation, or Save As behavior by assigning to
   them.
@@ -293,7 +293,7 @@ row array but continues to share the opaque payload objects.
 
 Read-only metadata protects the store's row structure, not the contents of an
 opaque Python payload. A dict, list, dataclass, or application object remains
-the same object supplied by the caller. The library will not deep-copy or
+the same object supplied by the caller. The library does not deep-copy or
 freeze arbitrary metadata objects.
 
 In practice, matrix inspection and row retrieval have different ownership:
@@ -311,7 +311,7 @@ payload["reviewed"] = True  # Allowed: shared opaque metadata object
 ```
 
 Applications that need immutable metadata can store frozen application objects
-or copy payloads at their own boundary. The vector store will not impose one
+or copy payloads at their own boundary. The vector store does not impose one
 copying policy on every metadata type.
 
 ### Safe row retrieval
@@ -383,9 +383,9 @@ replace one another, and the last successful replacement wins.
 
 ### Explicit non-goals
 
-Version 0.5 will not add update or delete operations, a separate builder,
+Version 0.5 does not add update or delete operations, a separate builder,
 streaming or async ingestion, internal locks, or multi-writer coordination. It
-will not deep-copy opaque metadata. These features are not needed to establish
+does not deep-copy opaque metadata. These features are not needed to establish
 safe ownership and amortized addition, and adding them now would widen the API
 before the existing core reaches stabilization.
 
@@ -404,8 +404,6 @@ Planned direction:
 - Add performance regression coverage for representative store sizes.
 - Exercise persistence upgrades and backwards compatibility.
 - Resolve known high- and medium-priority defects.
-- Complete documentation of ordering, memory use, concurrency, and trusted-file
-  requirements.
 
 ## 1.0.0: Stable contracts
 
