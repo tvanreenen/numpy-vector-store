@@ -667,6 +667,19 @@ class TestVectorStore:
         assert store.vectors.shape == (2, 2)
         assert store.metadata.tolist() == [1, 2]
 
+    def test_row_inspection_copies_are_independently_mutable(self):
+        """Test explicit full-array copies cannot change store-owned rows."""
+        store = VectorStore[dict[str, int]](dimensions=2, normalize=False)
+        store.add([[1.0, 2.0]], [{"id": 1}])
+        vectors = store.vectors.copy()
+        metadata = store.metadata.copy()
+
+        vectors[0, 0] = 10.0
+        metadata[0] = {"id": 2}
+
+        np.testing.assert_array_equal(store.vectors[0], np.array([1.0, 2.0]))
+        assert store.metadata[0] == {"id": 1}
+
     def test_clear(self):
         """Test clearing the store."""
         store = VectorStore(dimensions=2)

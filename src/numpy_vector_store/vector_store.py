@@ -87,14 +87,14 @@ class VectorStore(Generic[TMetadata]):
 
     @property
     def vectors(self) -> npt.NDArray[np.float32]:
-        """Return a read-only, moment-in-time view of stored vectors."""
+        """Return a zero-copy, non-writeable view of the current vectors."""
         view = self._vectors.view()
         view.flags.writeable = False
         return view
 
     @property
     def metadata(self) -> npt.NDArray[Any]:
-        """Return a read-only, moment-in-time view of metadata rows."""
+        """Return a zero-copy, non-writeable view of the current metadata rows."""
         view = self._metadata.view()
         view.flags.writeable = False
         return view

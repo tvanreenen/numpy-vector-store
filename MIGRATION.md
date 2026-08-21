@@ -54,9 +54,16 @@ store.metadata
 ```
 
 The difference is ownership. Configuration cannot be assigned directly, and
-the vector and metadata arrays reject row mutation. Their views describe the
-rows present when the property was requested, so code should request a fresh
-view after `add()`, `clear()`, or `reload()`.
+the vector and metadata views reject normal row mutation. Their views describe
+the rows present when the property was requested, so code should request a
+fresh view after `add()`, `clear()`, or `reload()`.
+
+The views are a supported inspection boundary, not tamper-proof snapshots.
+Deliberately mutating their backing storage through `.base`, private attributes,
+`ctypes`, or similar escape hatches is unsupported and can corrupt the store.
+Call `.copy()` when code needs an independently mutable full-array snapshot.
+For metadata, this copies the outer row array while preserving the opaque
+payload objects by reference.
 
 Row retrieval deliberately treats vectors and metadata differently:
 

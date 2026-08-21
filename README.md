@@ -77,11 +77,25 @@ and `file_path` are readable properties, but callers cannot assign them
 directly. Use the constructor for configuration, `open(path)` to open an
 archive, and `save(path)` to establish or change a binding.
 
-`store.vectors` and `store.metadata` are read-only, moment-in-time NumPy views.
-They provide zero-copy inspection of the current rows, including metadata
-prefiltering, without allowing callers to replace a row or alter a stored
-vector. Request a fresh view after `add()`, `clear()`, or `reload()` when current
-rows are required.
+`store.vectors` and `store.metadata` are zero-copy, non-writeable NumPy views
+for inspection and metadata prefiltering. Direct item assignment and ordinary
+attempts to enable writes are rejected. Request a fresh view after `add()`,
+`clear()`, or `reload()` when current rows are required.
+
+These views prevent accidental mutation through the supported API; they are not
+tamper-proof snapshots. NumPy exposes shared buffers, and Python private state
+can be reached deliberately. Mutating backing storage through `.base`, private
+attributes, `ctypes`, or similar escape hatches is unsupported and can corrupt
+store invariants. Use `.copy()` when code needs an independently mutable
+full-array snapshot:
+
+```python
+vectors = store.vectors.copy()
+metadata_rows = store.metadata.copy()
+```
+
+Copying `metadata` isolates the outer row array but still shares the opaque
+payload objects stored inside it.
 
 `get(index)` has a narrower ownership boundary:
 
