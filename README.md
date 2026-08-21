@@ -16,18 +16,52 @@ offers a simple alternative to heavyweight vector databases when you do not need
 network services, indexing infrastructure, ingestion pipelines, or domain-specific
 metadata filtering.
 
-## When/Where?
+## Performance
 
-Below are benchmark results for cosine similarity search to help you assess its
-suitability for your use case.
+`VectorStore` performs exact search over every selected row. The following
+measurements are reference points, not latency guarantees:
 
-| Embedding Type | Dimensions | ~5ms | ~25ms | ~100ms | ~500ms |
-|----------------|------------|------|--------|---------|---------|
-| **Sentence Transformers** | 384 | 1K vectors<br/>1.5MB | 10K vectors<br/>15MB | 100K vectors<br/>147MB | 500K vectors<br/>732MB |
-| **OpenAI Small** | 1536 | 500 vectors<br/>3MB | 5K vectors<br/>29MB | 25K vectors<br/>147MB | 100K vectors<br/>586MB |
-| **OpenAI Large** | 3072 | 200 vectors<br/>2MB | 2.5K vectors<br/>29MB | 5K vectors<br/>59MB | 25K vectors<br/>293MB |
+| Rows | Dimensions | Vector matrix | Median per cosine query |
+|---:|---:|---:|---:|
+| 1,000 | 384 | 1.5 MB | 0.030 ms |
+| 10,000 | 384 | 15.4 MB | 0.219 ms |
+| 100,000 | 384 | 153.6 MB | 2.914 ms |
+| 5,000 | 1,536 | 30.7 MB | 0.515 ms |
+| 25,000 | 1,536 | 153.6 MB | 2.403 ms |
+| 5,000 | 3,072 | 61.4 MB | 1.061 ms |
 
-*Benchmarks performed on Apple M2 hardware.*
+These are unfiltered `top_k=10` searches on a normalized store. Each row divides
+the median duration of seven measured 20-query trials by 20, after two discarded
+warmup trials. The vector matrix size excludes metadata, temporary search
+arrays, and Python process overhead.
+
+The measurements were taken from commit `469e1ce` on Apple M2 hardware with
+macOS 26.6.1, CPython 3.13.5, NumPy 2.3.3, and Accelerate BLAS. Hardware,
+operating system activity, Python and NumPy versions, BLAS implementation, and
+thread settings can all change the result.
+
+The repository includes benchmark commands that emit the inputs, environment,
+raw samples, and median as JSON:
+
+```bash
+uv run python benchmarks/benchmark.py search \
+  --rows 10000 --dimensions 384 --queries 20 --top-k 10 \
+  --warmup 2 --repetitions 7 > /tmp/nvs-search.json
+
+uv run python benchmarks/benchmark.py ingest \
+  --rows 10000 --dimensions 384 --batch-size 1 \
+  --warmup 2 --repetitions 7 > /tmp/nvs-ingest.json
+```
+
+For the same 10,000-by-384 prepared input, repeated single-row ingestion had a
+median of 78.5 ms, or about 127,000 rows per second. Supplying 1,000 rows per
+`add()` call had a median of 5.91 ms, or about 1.69 million rows per second.
+Both measurements include construction of a fresh normalized store and every
+`add()` call, but exclude input generation.
+
+See [the benchmark guide](benchmarks/README.md) for the timed regions, complete
+options, output fields, and interpretation notes. The project keeps structural
+complexity checks in CI, but does not fail shared runners on wall-clock timing.
 
 ## Installation
 
