@@ -1,6 +1,7 @@
 """Tests for the VectorStore class."""
 
 import os
+import pickle
 import stat
 import tempfile
 import warnings
@@ -30,6 +31,32 @@ class IndexValue:
 
     def __index__(self):
         return self.value
+
+
+@dataclass
+class StringPath:
+    """Custom string path-like value used to exercise persistence inputs."""
+
+    value: str
+
+    def __fspath__(self):
+        return self.value
+
+
+class MetadataLoadError(Exception):
+    """Application exception raised while restoring test metadata."""
+
+
+def raise_metadata_load_error():
+    """Raise the application error encoded in a test pickle payload."""
+    raise MetadataLoadError("metadata dependency is unavailable")
+
+
+class FailingMetadata:
+    """Metadata payload whose pickle raises an application error when loaded."""
+
+    def __reduce__(self):
+        return (raise_metadata_load_error, ())
 
 
 def add_single_vector(store, vector, metadata=None):
@@ -1030,6 +1057,62 @@ class TestVectorStore:
         assert len(store2) == 1
         assert store2.get(0)[1] == {"id": "test"}
 
+    def test_save_and_open_accept_string_path_like_values(self, tmp_path):
+        """Test persistence accepts the standard string path protocol."""
+        extensionless_path = StringPath(str(tmp_path / "path-like-vectors"))
+        expected_path = tmp_path / "path-like-vectors.npz"
+        store = VectorStore(dimensions=2)
+        store.add([[1.0, 0.0]], [{"id": "persisted"}])
+
+        store.save(extensionless_path)
+        opened = VectorStore.open(extensionless_path)
+
+        assert store.file_path == expected_path
+        assert opened.file_path == expected_path
+        assert opened.get(0)[1] == {"id": "persisted"}
+
+    @pytest.mark.parametrize("invalid_path", [None, 0, False, b"vectors", object()])
+    def test_open_rejects_non_path_inputs(self, invalid_path):
+        """Test open distinguishes invalid types from empty paths."""
+        with pytest.raises(TypeError, match="string or path-like"):
+            VectorStore.open(invalid_path)  # type: ignore[arg-type]
+
+    @pytest.mark.parametrize("empty_path", ["", StringPath("")])
+    def test_open_rejects_empty_path_values(self, empty_path):
+        """Test open rejects empty strings before path normalization."""
+        with pytest.raises(ValueError, match="path must not be empty"):
+            VectorStore.open(empty_path)
+
+    @pytest.mark.parametrize("invalid_path", [0, False, b"vectors", object()])
+    def test_save_rejects_non_path_inputs_without_rebinding(
+        self, tmp_path, invalid_path
+    ):
+        """Test invalid Save As types cannot replace an existing binding."""
+        original_path = tmp_path / "original.npz"
+        store = VectorStore(dimensions=2)
+        store.save(original_path)
+
+        with pytest.raises(TypeError, match="string or path-like"):
+            store.save(invalid_path)  # type: ignore[arg-type]
+
+        assert store.file_path == original_path
+        assert original_path.exists()
+
+    @pytest.mark.parametrize("empty_path", ["", StringPath("")])
+    def test_save_rejects_empty_path_values_without_rebinding(
+        self, tmp_path, empty_path
+    ):
+        """Test an empty Save As path is not mistaken for omitted path."""
+        original_path = tmp_path / "original.npz"
+        store = VectorStore(dimensions=2)
+        store.save(original_path)
+
+        with pytest.raises(ValueError, match="path must not be empty"):
+            store.save(empty_path)
+
+        assert store.file_path == original_path
+        assert original_path.exists()
+
     def test_save_with_path_binds_an_unbound_store(self, tmp_path):
         """Test the preferred first save writes and binds its destination."""
         extensionless_path = tmp_path / "vectors"
@@ -1260,6 +1343,26 @@ class TestVectorStore:
         expected = np.array([0.6, 0.8]) if normalize else np.array([3.0, 4.0])
         np.testing.assert_array_almost_equal(opened.get(0)[0], expected)
 
+    def test_open_reads_published_0_4_format_version_1_fixture(self):
+        """Test the current reader opens a real archive written by version 0.4."""
+        fixture_path = (
+            Path(__file__).parent / "fixtures" / "vector-store-0.4.0-format-v1.npz"
+        )
+
+        store = VectorStore[dict[str, object]].open(fixture_path)
+
+        assert store.dimensions == 3
+        assert store.normalize is False
+        assert store.file_path == fixture_path
+        np.testing.assert_array_equal(
+            store.vectors,
+            np.array([[1.5, -2.0, 0.25], [0.0, 3.0, 4.0]], dtype=np.float32),
+        )
+        assert store.metadata.tolist() == [
+            {"id": "alpha", "tags": ("legacy", 4)},
+            {"id": "beta", "active": True},
+        ]
+
     def test_open_resolves_extensionless_path(self, tmp_path):
         """Test open uses the same extension resolution as save."""
         extensionless_path = tmp_path / "vectors"
@@ -1276,10 +1379,34 @@ class TestVectorStore:
         with pytest.raises(FileNotFoundError):
             VectorStore.open(tmp_path / "missing")
 
-    def test_open_rejects_empty_path(self):
-        """Test open requires a meaningful archive path."""
-        with pytest.raises(ValueError, match="path"):
-            VectorStore.open("")
+    def test_open_preserves_numpy_archive_deserialization_errors(self, tmp_path):
+        """Test malformed containers retain NumPy's native failure type."""
+        file_path = tmp_path / "malformed.npz"
+        file_path.write_bytes(b"not a NumPy archive")
+
+        with pytest.raises(pickle.UnpicklingError) as error:
+            VectorStore.open(file_path)
+
+        assert type(error.value) is pickle.UnpicklingError
+
+    def test_open_preserves_application_metadata_load_errors(self, tmp_path):
+        """Test metadata dependencies can report their own load failures."""
+        file_path = tmp_path / "failing-metadata.npz"
+        np.savez_compressed(
+            file_path,
+            format_version=np.array(1, dtype=np.int64),
+            dimensions=np.array(2, dtype=np.int64),
+            normalize=np.array(True, dtype=np.bool_),
+            vectors=np.array([[1.0, 0.0]], dtype=np.float32),
+            metadata=np.array([FailingMetadata()], dtype=object),
+        )
+
+        with pytest.raises(
+            MetadataLoadError, match="metadata dependency is unavailable"
+        ) as error:
+            VectorStore.open(file_path)
+
+        assert type(error.value) is MetadataLoadError
 
     def test_open_rejects_unversioned_archive(self, tmp_path):
         """Test open requires the self-describing version 1 schema."""
@@ -1670,10 +1797,10 @@ class TestVectorStore:
             store.save()
 
     def test_save_rejects_empty_file_path(self):
-        """Test an explicit empty path cannot bind a store."""
+        """Test an explicit empty path is not treated like omitted save()."""
         store = VectorStore(dimensions=2)
 
-        with pytest.raises(ValueError, match="file path"):
+        with pytest.raises(ValueError, match="path must not be empty"):
             store.save("")
 
     def test_save_empty_vectors(self):
