@@ -600,6 +600,7 @@ class TestVectorStore:
             top_k=1,
             within_rows=None,
             values_fn=capture_vectors,
+            normalize_query=False,
             descending=True,
             min_value=None,
             max_value=None,
@@ -696,6 +697,43 @@ class TestVectorStore:
 
         with pytest.raises(IndexError, match="outside"):
             getattr(store, search_name)([1.0, 0.0], within_rows=[len(store)])
+
+    @pytest.mark.parametrize(
+        ("search_name", "normalize"),
+        [
+            ("cosine_search", True),
+            ("cosine_search", False),
+            ("dot_search", True),
+            ("euclidean_search", True),
+        ],
+    )
+    @pytest.mark.parametrize("within_rows", [None, []])
+    @pytest.mark.parametrize("populated", [False, True])
+    def test_metric_searches_reject_zero_queries_independent_of_state(
+        self, search_name, normalize, within_rows, populated
+    ):
+        """Test query normalization cannot be bypassed by an empty search."""
+        store = VectorStore(dimensions=2, normalize=normalize)
+        if populated:
+            store.add([[1.0, 0.0]], [{"id": "x"}])
+
+        with pytest.raises(ValueError, match="zero-norm"):
+            getattr(store, search_name)([0.0, 0.0], within_rows=within_rows)
+
+    @pytest.mark.parametrize("search_name", ["dot_search", "euclidean_search"])
+    @pytest.mark.parametrize("within_rows", [None, []])
+    @pytest.mark.parametrize("populated", [False, True])
+    def test_raw_metric_searches_accept_zero_queries_independent_of_state(
+        self, search_name, within_rows, populated
+    ):
+        """Test raw dot and Euclidean searches keep zero-query semantics."""
+        store = VectorStore(dimensions=2, normalize=False)
+        if populated:
+            store.add([[1.0, 0.0]], [{"id": "x"}])
+
+        results = getattr(store, search_name)([0.0, 0.0], within_rows=within_rows)
+
+        assert len(results) == (1 if populated and within_rows is None else 0)
 
     @pytest.mark.parametrize(
         "search_name", ["cosine_search", "dot_search", "euclidean_search"]
