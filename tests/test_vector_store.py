@@ -1,6 +1,7 @@
 """Tests for the VectorStore class."""
 
 import os
+import pickle
 import stat
 import tempfile
 import warnings
@@ -40,6 +41,22 @@ class StringPath:
 
     def __fspath__(self):
         return self.value
+
+
+class MetadataLoadError(Exception):
+    """Application exception raised while restoring test metadata."""
+
+
+def raise_metadata_load_error():
+    """Raise the application error encoded in a test pickle payload."""
+    raise MetadataLoadError("metadata dependency is unavailable")
+
+
+class FailingMetadata:
+    """Metadata payload whose pickle raises an application error when loaded."""
+
+    def __reduce__(self):
+        return (raise_metadata_load_error, ())
 
 
 def add_single_vector(store, vector, metadata=None):
@@ -1341,6 +1358,35 @@ class TestVectorStore:
         """Test open fails clearly when its resolved archive does not exist."""
         with pytest.raises(FileNotFoundError):
             VectorStore.open(tmp_path / "missing")
+
+    def test_open_preserves_numpy_archive_deserialization_errors(self, tmp_path):
+        """Test malformed containers retain NumPy's native failure type."""
+        file_path = tmp_path / "malformed.npz"
+        file_path.write_bytes(b"not a NumPy archive")
+
+        with pytest.raises(pickle.UnpicklingError) as error:
+            VectorStore.open(file_path)
+
+        assert type(error.value) is pickle.UnpicklingError
+
+    def test_open_preserves_application_metadata_load_errors(self, tmp_path):
+        """Test metadata dependencies can report their own load failures."""
+        file_path = tmp_path / "failing-metadata.npz"
+        np.savez_compressed(
+            file_path,
+            format_version=np.array(1, dtype=np.int64),
+            dimensions=np.array(2, dtype=np.int64),
+            normalize=np.array(True, dtype=np.bool_),
+            vectors=np.array([[1.0, 0.0]], dtype=np.float32),
+            metadata=np.array([FailingMetadata()], dtype=object),
+        )
+
+        with pytest.raises(
+            MetadataLoadError, match="metadata dependency is unavailable"
+        ) as error:
+            VectorStore.open(file_path)
+
+        assert type(error.value) is MetadataLoadError
 
     def test_open_rejects_unversioned_archive(self, tmp_path):
         """Test open requires the self-describing version 1 schema."""
