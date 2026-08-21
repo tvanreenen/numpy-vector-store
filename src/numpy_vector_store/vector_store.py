@@ -3,7 +3,6 @@ from __future__ import annotations
 import operator
 import os
 import stat
-import warnings
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 from pathlib import Path
@@ -506,15 +505,16 @@ class VectorStore(Generic[TMetadata]):
         self,
         within_rows: Sequence[SupportsIndex] | npt.NDArray[np.integer[Any]],
     ) -> npt.NDArray[np.intp]:
-        with warnings.catch_warnings():
-            warnings.filterwarnings(
-                "ignore",
-                message="Creating an ndarray from ragged nested sequences",
+        if isinstance(within_rows, np.ndarray):
+            rows = np.asarray(within_rows)
+        else:
+            has_nested_rows = any(
+                isinstance(row, (list, tuple, np.ndarray)) for row in within_rows
             )
-            try:
-                rows = np.asarray(within_rows)
-            except ValueError:
-                rows = np.asarray(within_rows, dtype=object)
+            rows = np.asarray(
+                within_rows,
+                dtype=object if has_nested_rows else None,
+            )
 
         if rows.ndim != 1:
             raise ValueError("within_rows must be a 1D sequence of row indexes")

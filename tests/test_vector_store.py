@@ -675,6 +675,7 @@ class TestVectorStore:
         [
             ([[0]], ValueError, "1D"),
             ([[0], [0, 1]], ValueError, "1D"),
+            ([0, [0, 1]], ValueError, "1D"),
             ([0.0], TypeError, "integer"),
             ([True], TypeError, "integer"),
             ([np.bool_(True)], TypeError, "integer"),
