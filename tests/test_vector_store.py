@@ -13,11 +13,6 @@ import pytest
 import numpy_vector_store.vector_store as vector_store_module
 from numpy_vector_store import VectorHit, VectorStore
 
-pytestmark = [
-    pytest.mark.filterwarnings("ignore:.*file_path.*deprecated.*:FutureWarning"),
-    pytest.mark.filterwarnings("ignore:VectorStore.load.*deprecated.*:FutureWarning"),
-]
-
 
 @dataclass
 class MetadataRecord:
@@ -55,25 +50,14 @@ class TestVectorStore:
         with pytest.raises(ValueError, match="dimensions"):
             VectorStore(dimensions=0)
 
-    def test_constructor_file_path_warns_with_preferred_alternatives(self, tmp_path):
-        """Test constructor path binding points users to the preferred API."""
-        with pytest.warns(FutureWarning, match=r"save\(path\).+open\(path\)"):
-            store = VectorStore(dimensions=2, file_path=tmp_path / "vectors.npz")
+    def test_removed_persistence_entry_points_are_not_supported(self, tmp_path):
+        """Test 0.4 constructor binding and instance loading are gone."""
+        with pytest.raises(TypeError, match="file_path"):
+            VectorStore(dimensions=2, file_path=tmp_path / "vectors.npz")  # type: ignore[call-arg]
 
-        assert store.file_path == tmp_path / "vectors.npz"
-
-    def test_constructor_without_file_path_does_not_warn(self):
-        """Test the preferred empty-store constructor remains warning-free."""
-        with warnings.catch_warnings():
-            warnings.simplefilter("error", FutureWarning)
-            VectorStore(dimensions=2)
-
-    def test_instance_load_warns_with_open_and_reload_alternatives(self):
-        """Test load points users to initial opening and explicit refreshing."""
         store = VectorStore(dimensions=2)
-
-        with pytest.warns(FutureWarning, match=r"open\(path\).+reload\(\)"):
-            store.load()
+        with pytest.raises(AttributeError, match="load"):
+            store.load()  # type: ignore[attr-defined]
 
     def test_add_preferred_api(self):
         """Test adding vectors with the preferred add API."""
@@ -632,12 +616,11 @@ class TestVectorStore:
             file_path = tmp.name
 
         try:
-            store1 = VectorStore(dimensions=2, file_path=file_path)
+            store1 = VectorStore(dimensions=2)
             add_single_vector(store1, np.array([1.0, 2.0]), {"id": "test"})
-            store1.save()
+            store1.save(file_path)
 
-            store2 = VectorStore(dimensions=2, file_path=file_path)
-            store2.load()
+            store2 = VectorStore.open(file_path)
 
             assert len(store2.vectors) == 1
             assert store2.get(0)[1] == {"id": "test"}
@@ -649,15 +632,14 @@ class TestVectorStore:
         file_path = tmp_path / "vectors"
         expected_path = tmp_path / "vectors.npz"
 
-        store1 = VectorStore(dimensions=2, file_path=file_path)
+        store1 = VectorStore(dimensions=2)
         add_single_vector(store1, np.array([1.0, 2.0]), {"id": "test"})
-        store1.save()
+        store1.save(file_path)
 
         assert store1.file_path == expected_path
         assert expected_path.exists()
 
-        store2 = VectorStore(dimensions=2, file_path=file_path)
-        store2.load()
+        store2 = VectorStore.open(file_path)
 
         assert len(store2) == 1
         assert store2.get(0)[1] == {"id": "test"}
@@ -825,9 +807,9 @@ class TestVectorStore:
             file_path = tmp.name
 
         try:
-            store = VectorStore[dict[str, str]](dimensions=2, file_path=file_path)
+            store = VectorStore[dict[str, str]](dimensions=2)
             store.add([[1.0, 2.0]], [{"id": "test"}])
-            store.save()
+            store.save(file_path)
 
             with np.load(file_path, allow_pickle=True) as data:
                 assert set(data.files) == {
@@ -859,15 +841,14 @@ class TestVectorStore:
             "scalar",
             {"id": 5},
         ]
-        store = VectorStore[object](dimensions=2, file_path=file_path)
+        store = VectorStore[object](dimensions=2)
         store.add(
             [[1.0, 0.0], [0.0, 1.0], [1.0, 1.0], [1.0, -1.0], [2.0, 1.0]],
             payloads,
         )
-        store.save()
+        store.save(file_path)
 
-        loaded = VectorStore[object](dimensions=2, file_path=file_path)
-        loaded.load()
+        loaded = VectorStore[object].open(file_path)
 
         assert loaded.metadata.shape == (5,)
         assert loaded.metadata.tolist() == payloads
@@ -878,11 +859,10 @@ class TestVectorStore:
         file_path = tmp_path / "vectors.npz"
         persisted = VectorStore[dict[str, str]](
             dimensions=2,
-            file_path=file_path,
             normalize=normalize,
         )
         persisted.add([[3.0, 4.0]], [{"id": "persisted"}])
-        persisted.save()
+        persisted.save(file_path)
 
         opened = VectorStore[dict[str, str]].open(path=file_path)
 
@@ -898,8 +878,8 @@ class TestVectorStore:
         """Test open uses the same extension resolution as save and load."""
         extensionless_path = tmp_path / "vectors"
         expected_path = tmp_path / "vectors.npz"
-        persisted = VectorStore(dimensions=2, file_path=extensionless_path)
-        persisted.save()
+        persisted = VectorStore(dimensions=2)
+        persisted.save(extensionless_path)
 
         opened = VectorStore.open(extensionless_path)
 
@@ -916,98 +896,42 @@ class TestVectorStore:
             VectorStore.open("")
 
     def test_open_rejects_unversioned_archive(self, tmp_path):
-        """Test open directs legacy archives through the migration API."""
-        file_path = tmp_path / "legacy.npz"
+        """Test open requires the self-describing version 1 schema."""
+        file_path = tmp_path / "unversioned.npz"
         np.savez_compressed(
             file_path,
             vectors=np.empty((0, 2), dtype=np.float32),
             metadata=np.array([], dtype=object),
         )
 
-        with pytest.raises(ValueError, match="legacy 0.4 API"):
+        with pytest.raises(ValueError, match="missing fields: format_version"):
             VectorStore.open(file_path)
 
-    def test_load_supports_minimal_format(self):
-        """Test files with vectors and metadata load."""
-        with tempfile.NamedTemporaryFile(suffix=".npz", delete=False) as tmp:
-            file_path = tmp.name
-
-        try:
-            np.savez_compressed(
-                file_path,
-                vectors=np.array([[1.0, 0.0]], dtype=np.float32),
-                metadata=np.array([{"id": "legacy"}], dtype=object),
-            )
-
-            store = VectorStore[dict[str, str]](dimensions=2, file_path=file_path)
-            with pytest.warns(FutureWarning, match="format version 1"):
-                store.load()
-
-            assert len(store) == 1
-            assert store.get(0)[1] == {"id": "legacy"}
-        finally:
-            Path(file_path).unlink(missing_ok=True)
-
-    def test_save_migrates_loaded_legacy_archive(self, tmp_path):
-        """Test saving a legacy load rewrites it with the version 1 schema."""
-        file_path = tmp_path / "vectors.npz"
-        np.savez_compressed(
-            file_path,
-            vectors=np.array([[3.0, 4.0]], dtype=np.float32),
-            metadata=np.array([{"id": "legacy"}], dtype=object),
-        )
-        store = VectorStore[dict[str, str]](dimensions=2, file_path=file_path)
-
-        with pytest.warns(FutureWarning, match="removed in 0.5"):
-            store.load()
-        store.save()
-
-        with np.load(file_path, allow_pickle=True) as data:
-            assert set(data.files) == {
-                "format_version",
-                "dimensions",
-                "normalize",
-                "vectors",
-                "metadata",
-            }
-            assert data["format_version"].item() == 1
-            assert data["dimensions"].item() == 2
-            assert data["normalize"].item() is True
-
-        with warnings.catch_warnings():
-            warnings.simplefilter("error", FutureWarning)
-            migrated = VectorStore[dict[str, str]].open(file_path)
-        assert migrated.get(0)[1] == {"id": "legacy"}
-
     @pytest.mark.parametrize(
-        ("target_dimensions", "target_normalize", "message"),
+        ("archive_dimensions", "archive_normalize", "message"),
         [(3, True, "dimensions"), (2, False, "normalize")],
     )
-    def test_load_rejects_versioned_configuration_mismatch(
-        self, tmp_path, target_dimensions, target_normalize, message
+    def test_reload_rejects_versioned_configuration_mismatch(
+        self, tmp_path, archive_dimensions, archive_normalize, message
     ):
         """Test archive configuration cannot silently change store semantics."""
         file_path = tmp_path / "vectors.npz"
-        persisted = VectorStore(dimensions=2, file_path=file_path)
-        persisted.add([[1.0, 0.0]], [{"id": "persisted"}])
-        persisted.save()
-        store = VectorStore(
-            dimensions=target_dimensions,
-            file_path=file_path,
-            normalize=target_normalize,
+        store = VectorStore[dict[str, str]](dimensions=2)
+        store.add([[1.0, 0.0]], [{"id": "in-memory"}])
+        store.save(file_path)
+        replacement = VectorStore(
+            dimensions=archive_dimensions,
+            normalize=archive_normalize,
         )
-        store.add(
-            [np.ones(target_dimensions, dtype=np.float32)],
-            [{"id": "in-memory"}],
-        )
+        replacement.save(file_path)
 
         with pytest.raises(ValueError, match=message):
-            store.load()
+            store.reload()
 
         assert len(store) == 1
         assert store.get(0)[1] == {"id": "in-memory"}
 
-    def test_load_rejects_unknown_archive_version(self, tmp_path):
+    def test_open_rejects_unknown_archive_version(self, tmp_path):
         """Test unknown archive versions fail instead of being guessed at."""
         file_path = tmp_path / "vectors.npz"
         np.savez_compressed(
@@ -1018,10 +942,8 @@ class TestVectorStore:
             vectors=np.empty((0, 2), dtype=np.float32),
             metadata=np.array([], dtype=object),
         )
-        store = VectorStore(dimensions=2, file_path=file_path)
-
         with pytest.raises(ValueError, match="format version: 2"):
-            store.load()
+            VectorStore.open(file_path)
 
     def test_unknown_archive_version_is_checked_before_its_fields(self, tmp_path):
         """Test future-version fields do not obscure an unsupported version."""
@@ -1035,10 +957,8 @@ class TestVectorStore:
             metadata=np.array([], dtype=object),
             future_configuration=np.array("value"),
         )
-        store = VectorStore(dimensions=2, file_path=file_path)
-
         with pytest.raises(ValueError, match="format version: 2"):
-            store.load()
+            VectorStore.open(file_path)
 
     @pytest.mark.parametrize(
         ("field", "value", "message"),
@@ -1048,7 +968,7 @@ class TestVectorStore:
             ("normalize", np.array(1, dtype=np.int64), "scalar boolean"),
         ],
     )
-    def test_load_rejects_malformed_archive_configuration(
+    def test_open_rejects_malformed_archive_configuration(
         self, tmp_path, field, value, message
     ):
         """Test versioned configuration values use their documented types."""
@@ -1062,10 +982,8 @@ class TestVectorStore:
         }
         archive[field] = value
         np.savez_compressed(file_path, **archive)
-        store = VectorStore(dimensions=2, file_path=file_path)
-
         with pytest.raises(ValueError, match=message):
-            store.load()
+            VectorStore.open(file_path)
 
     @pytest.mark.parametrize(
         ("vectors", "metadata", "message"),
@@ -1082,7 +1000,7 @@ class TestVectorStore:
             ),
         ],
     )
-    def test_load_rejects_malformed_archive_array_dtypes(
+    def test_open_rejects_malformed_archive_array_dtypes(
         self, tmp_path, vectors, metadata, message
     ):
         """Test versioned arrays use their documented storage dtypes."""
@@ -1095,14 +1013,17 @@ class TestVectorStore:
             vectors=vectors,
             metadata=metadata,
         )
-        store = VectorStore(dimensions=2, file_path=file_path)
-
         with pytest.raises(ValueError, match=message):
-            store.load()
+            VectorStore.open(file_path)
 
-    def test_load_preserves_state_after_array_validation_failure(self, tmp_path):
+    def test_reload_preserves_state_after_array_validation_failure(self, tmp_path):
         """Test late archive validation cannot partially replace live rows."""
         file_path = tmp_path / "vectors.npz"
+        store = VectorStore[dict[str, str]](dimensions=2)
+        store.add([[3.0, 4.0]], [{"id": "in-memory"}])
+        store.save(file_path)
+        original_vectors = store.vectors.copy()
+        original_metadata = store.metadata.copy()
         np.savez_compressed(
             file_path,
             format_version=np.array(1, dtype=np.int64),
@@ -1111,34 +1032,12 @@ class TestVectorStore:
             vectors=np.array([[1.0, 0.0], [0.0, 1.0]], dtype=np.float32),
             metadata=np.array([{"id": "only-one"}], dtype=object),
         )
-        store = VectorStore[dict[str, str]](dimensions=2, file_path=file_path)
-        store.add([[3.0, 4.0]], [{"id": "in-memory"}])
-        original_vectors = store.vectors.copy()
-        original_metadata = store.metadata.copy()
 
         with pytest.raises(ValueError, match="length mismatch"):
-            store.load()
+            store.reload()
 
         np.testing.assert_array_equal(store.vectors, original_vectors)
         np.testing.assert_array_equal(store.metadata, original_metadata)
-
-    def test_explicit_load_when_file_exists(self):
-        """Test explicit loading when file exists."""
-        with tempfile.NamedTemporaryFile(suffix=".npz", delete=False) as tmp:
-            file_path = tmp.name
-
-        try:
-            store1 = VectorStore(dimensions=2, file_path=file_path)
-            add_single_vector(store1, np.array([1.0, 2.0]), {"id": "explicit_test"})
-            store1.save()
-
-            store2 = VectorStore(dimensions=2, file_path=file_path)
-            store2.load()
-
-            assert len(store2.vectors) == 1
-            assert store2.get(0)[1] == {"id": "explicit_test"}
-        finally:
-            Path(file_path).unlink(missing_ok=True)
 
     def test_context_manager_is_not_supported(self):
         """Test persistence has no implicit context-manager boundary."""
@@ -1147,68 +1046,6 @@ class TestVectorStore:
         with pytest.raises(TypeError, match="context manager protocol"):
             with store:  # type: ignore[attr-defined]
                 pass
-
-    def test_load_file_not_exists(self):
-        """Test loading when file doesn't exist."""
-        with tempfile.NamedTemporaryFile(suffix=".npz", delete=False) as tmp:
-            file_path = tmp.name
-
-        try:
-            Path(file_path).unlink()
-
-            store = VectorStore(dimensions=2, file_path=file_path)
-            store.load()
-
-            assert len(store.vectors) == 0
-        finally:
-            Path(file_path).unlink(missing_ok=True)
-
-    def test_load_retries_after_file_is_created(self, tmp_path):
-        """Test a missing file does not prevent a later load attempt."""
-        file_path = tmp_path / "vectors.npz"
-        store = VectorStore(dimensions=2, file_path=file_path)
-
-        store.load()
-
-        persisted = VectorStore(dimensions=2, file_path=file_path)
-        add_single_vector(persisted, np.array([1.0, 2.0]), {"id": "created"})
-        persisted.save()
-        store.load()
-
-        assert len(store) == 1
-        assert store.get(0)[1] == {"id": "created"}
-
-    def test_load_already_loaded(self):
-        """Test loading when already loaded."""
-        with tempfile.NamedTemporaryFile(suffix=".npz", delete=False) as tmp:
-            file_path = tmp.name
-
-        try:
-            store1 = VectorStore(dimensions=2, file_path=file_path)
-            add_single_vector(store1, np.array([1.0, 2.0]), {"id": "test"})
-            store1.save()
-
-            store2 = VectorStore(dimensions=2, file_path=file_path)
-            store2.load()
-            store2.load()
-
-            assert len(store2.vectors) == 1
-        finally:
-            Path(file_path).unlink(missing_ok=True)
-
-    def test_load_after_clear_restores_persisted_rows(self, tmp_path):
-        """Test clear resets load state so persisted rows can be restored."""
-        file_path = tmp_path / "vectors.npz"
-        store = VectorStore(dimensions=2, file_path=file_path)
-        add_single_vector(store, np.array([1.0, 2.0]), {"id": "persisted"})
-        store.save()
-        store.load()
-
-        store.clear()
-        store.load()
-
-        assert len(store) == 1
-        assert store.get(0)[1] == {"id": "persisted"}
 
     def test_reload_refreshes_an_open_store(self, tmp_path):
         """Test reload always replaces memory from the bound archive."""
@@ -1268,92 +1105,103 @@ class TestVectorStore:
         assert len(store) == 1
         assert store.get(0)[1] == {"id": "persisted"}
 
-    def test_load_raises_on_vector_dimension_mismatch(self):
-        """Test load fails fast when persisted vector dimensions don't match store."""
+    def test_open_raises_on_vector_dimension_mismatch(self):
+        """Test open rejects vectors that conflict with archive dimensions."""
         with tempfile.NamedTemporaryFile(suffix=".npz", delete=False) as tmp:
             file_path = tmp.name
 
         try:
             np.savez_compressed(
                 file_path,
+                format_version=np.array(1, dtype=np.int64),
+                dimensions=np.array(3, dtype=np.int64),
+                normalize=np.array(True, dtype=np.bool_),
                 vectors=np.array([[1.0, 2.0]], dtype=np.float32),
                 metadata=np.array([{"id": "test"}], dtype=object),
             )
 
-            store = VectorStore(dimensions=3, file_path=file_path)
             with pytest.raises(ValueError, match="Loaded vector dimension"):
-                store.load()
+                VectorStore.open(file_path)
         finally:
             Path(file_path).unlink(missing_ok=True)
 
-    def test_load_raises_on_metadata_length_mismatch(self):
-        """Test load fails fast when vectors/metadata lengths are inconsistent."""
+    def test_open_raises_on_metadata_length_mismatch(self):
+        """Test open rejects inconsistent vector and metadata row counts."""
         with tempfile.NamedTemporaryFile(suffix=".npz", delete=False) as tmp:
             file_path = tmp.name
 
         try:
             np.savez_compressed(
                 file_path,
+                format_version=np.array(1, dtype=np.int64),
+                dimensions=np.array(2, dtype=np.int64),
+                normalize=np.array(True, dtype=np.bool_),
                 vectors=np.array([[1.0, 2.0], [3.0, 4.0]], dtype=np.float32),
                 metadata=np.array([{"id": "only-one"}], dtype=object),
             )
 
-            store = VectorStore(dimensions=2, file_path=file_path)
             with pytest.raises(ValueError, match="length mismatch"):
-                store.load()
+                VectorStore.open(file_path)
         finally:
             Path(file_path).unlink(missing_ok=True)
 
-    def test_load_raises_on_missing_required_arrays(self):
-        """Test load fails fast when required persisted arrays are absent."""
-        with tempfile.NamedTemporaryFile(suffix=".npz", delete=False) as tmp:
-            file_path = tmp.name
-
-        try:
-            np.savez_compressed(file_path, vectors=np.empty((0, 2), dtype=np.float32))
-
-            store = VectorStore(dimensions=2, file_path=file_path)
-            with pytest.raises(ValueError, match="metadata"):
-                store.load()
-        finally:
-            Path(file_path).unlink(missing_ok=True)
-
-    def test_load_normalizes_non_zero_vectors(self):
-        """Test load normalizes valid vectors once before storing them."""
+    def test_open_raises_on_missing_required_arrays(self):
+        """Test open fails fast when required persisted arrays are absent."""
         with tempfile.NamedTemporaryFile(suffix=".npz", delete=False) as tmp:
             file_path = tmp.name
 
         try:
             np.savez_compressed(
                 file_path,
+                format_version=np.array(1, dtype=np.int64),
+                dimensions=np.array(2, dtype=np.int64),
+                normalize=np.array(True, dtype=np.bool_),
+                vectors=np.empty((0, 2), dtype=np.float32),
+            )
+
+            with pytest.raises(ValueError, match="metadata"):
+                VectorStore.open(file_path)
+        finally:
+            Path(file_path).unlink(missing_ok=True)
+
+    def test_open_normalizes_non_zero_vectors(self):
+        """Test open restores normalized storage semantics."""
+        with tempfile.NamedTemporaryFile(suffix=".npz", delete=False) as tmp:
+            file_path = tmp.name
+
+        try:
+            np.savez_compressed(
+                file_path,
+                format_version=np.array(1, dtype=np.int64),
+                dimensions=np.array(2, dtype=np.int64),
+                normalize=np.array(True, dtype=np.bool_),
                 vectors=np.array([[2.0, 0.0]], dtype=np.float32),
                 metadata=np.array([{"id": "test"}], dtype=object),
             )
 
-            store = VectorStore(dimensions=2, file_path=file_path)
-            with pytest.warns(FutureWarning, match="format version 1"):
-                store.load()
+            store = VectorStore.open(file_path)
 
             np.testing.assert_array_almost_equal(store.vectors[0], np.array([1.0, 0.0]))
             assert store.cosine_search([1.0, 0.0])[0].value == pytest.approx(1.0)
         finally:
             Path(file_path).unlink(missing_ok=True)
 
-    def test_load_preserves_raw_vectors_when_normalize_false(self):
-        """Test load preserves valid vectors when normalize=False."""
+    def test_open_preserves_raw_vectors_when_normalize_false(self):
+        """Test open preserves valid vectors when normalize=False."""
         with tempfile.NamedTemporaryFile(suffix=".npz", delete=False) as tmp:
             file_path = tmp.name
 
         try:
             np.savez_compressed(
                 file_path,
+                format_version=np.array(1, dtype=np.int64),
+                dimensions=np.array(2, dtype=np.int64),
+                normalize=np.array(False, dtype=np.bool_),
                 vectors=np.array([[2.0, 0.0]], dtype=np.float32),
                 metadata=np.array([{"id": "test"}], dtype=object),
             )
 
-            store = VectorStore(dimensions=2, file_path=file_path, normalize=False)
-            with pytest.warns(FutureWarning, match="format version 1"):
-                store.load()
+            store = VectorStore.open(file_path)
 
             np.testing.assert_array_equal(store.vectors[0], np.array([2.0, 0.0]))
             assert store.cosine_search([1.0, 0.0])[0].value == pytest.approx(1.0)
@@ -1361,25 +1209,27 @@ class TestVectorStore:
         finally:
             Path(file_path).unlink(missing_ok=True)
 
-    def test_load_raises_on_zero_norm_vectors(self):
-        """Test load rejects persisted zero-norm vectors."""
+    def test_open_raises_on_zero_norm_vectors(self):
+        """Test open rejects persisted zero-norm vectors."""
         with tempfile.NamedTemporaryFile(suffix=".npz", delete=False) as tmp:
             file_path = tmp.name
 
         try:
             np.savez_compressed(
                 file_path,
+                format_version=np.array(1, dtype=np.int64),
+                dimensions=np.array(2, dtype=np.int64),
+                normalize=np.array(True, dtype=np.bool_),
                 vectors=np.array([[0.0, 0.0]], dtype=np.float32),
                 metadata=np.array([{"id": "zero"}], dtype=object),
             )
 
-            store = VectorStore(dimensions=2, file_path=file_path)
             with pytest.raises(ValueError, match="zero-norm"):
-                store.load()
+                VectorStore.open(file_path)
         finally:
             Path(file_path).unlink(missing_ok=True)
 
-    def test_load_allows_zero_norm_vectors_when_normalize_false(self):
+    def test_open_allows_zero_norm_vectors_when_normalize_false(self):
         """Test raw stores load zero rows for dot and Euclidean search."""
         with tempfile.NamedTemporaryFile(suffix=".npz", delete=False) as tmp:
             file_path = tmp.name
@@ -1387,13 +1237,14 @@ class TestVectorStore:
         try:
             np.savez_compressed(
                 file_path,
+                format_version=np.array(1, dtype=np.int64),
+                dimensions=np.array(2, dtype=np.int64),
+                normalize=np.array(False, dtype=np.bool_),
                 vectors=np.array([[0.0, 0.0]], dtype=np.float32),
                 metadata=np.array([{"id": "zero"}], dtype=object),
             )
 
-            store = VectorStore(dimensions=2, file_path=file_path, normalize=False)
-            with pytest.warns(FutureWarning, match="format version 1"):
-                store.load()
+            store = VectorStore.open(file_path)
 
             np.testing.assert_array_equal(store.get(0)[0], np.zeros(2))
             assert store.dot_search([1.0, 0.0])[0].value == pytest.approx(0.0)
@@ -1404,44 +1255,23 @@ class TestVectorStore:
             Path(file_path).unlink(missing_ok=True)
 
     @pytest.mark.parametrize("non_finite", [np.nan, np.inf, -np.inf])
-    def test_load_raises_on_non_finite_vectors(self, non_finite):
-        """Test load rejects persisted non-finite vectors."""
+    def test_open_raises_on_non_finite_vectors(self, non_finite):
+        """Test open rejects persisted non-finite vectors."""
         with tempfile.NamedTemporaryFile(suffix=".npz", delete=False) as tmp:
             file_path = tmp.name
 
         try:
             np.savez_compressed(
                 file_path,
+                format_version=np.array(1, dtype=np.int64),
+                dimensions=np.array(2, dtype=np.int64),
+                normalize=np.array(True, dtype=np.bool_),
                 vectors=np.array([[non_finite, 1.0]], dtype=np.float32),
                 metadata=np.array([{"id": "invalid"}], dtype=object),
             )
 
-            store = VectorStore(dimensions=2, file_path=file_path)
             with pytest.raises(ValueError, match="non-finite"):
-                store.load()
-
-            assert len(store) == 0
-            assert len(store.metadata) == 0
-        finally:
-            Path(file_path).unlink(missing_ok=True)
-
-    def test_load_rejects_values_outside_float32_without_warning(self):
-        """Test loading out-of-range values produces only the validation error."""
-        with tempfile.NamedTemporaryFile(suffix=".npz", delete=False) as tmp:
-            file_path = tmp.name
-
-        try:
-            np.savez_compressed(
-                file_path,
-                vectors=np.array([[1e100, 1.0]], dtype=np.float64),
-                metadata=np.array([{"id": "out-of-range"}], dtype=object),
-            )
-
-            store = VectorStore(dimensions=2, file_path=file_path)
-            with warnings.catch_warnings():
-                warnings.simplefilter("error", RuntimeWarning)
-                with pytest.raises(ValueError, match="non-finite"):
-                    store.load()
+                VectorStore.open(file_path)
         finally:
             Path(file_path).unlink(missing_ok=True)
 
@@ -1466,8 +1296,8 @@ class TestVectorStore:
             file_path = tmp.name
 
         try:
-            store = VectorStore(dimensions=2, file_path=file_path)
-            store.save()
+            store = VectorStore(dimensions=2)
+            store.save(file_path)
         finally:
             Path(file_path).unlink(missing_ok=True)
 
@@ -1477,15 +1307,14 @@ class TestVectorStore:
             file_path = tmp.name
 
         try:
-            store1 = VectorStore(dimensions=2, file_path=file_path)
+            store1 = VectorStore(dimensions=2)
             add_single_vector(store1, np.array([1.0, 2.0]), {"id": "test"})
-            store1.save()
+            store1.save(file_path)
 
             store1.clear()
             store1.save()
 
-            store2 = VectorStore(dimensions=2, file_path=file_path)
-            store2.load()
+            store2 = VectorStore.open(file_path)
             assert len(store2.vectors) == 0
             assert len(store2.metadata) == 0
         finally:
@@ -1497,9 +1326,9 @@ class TestVectorStore:
             file_path = tmp.name
 
         try:
-            store1 = VectorStore(dimensions=2, file_path=file_path, normalize=False)
+            store1 = VectorStore(dimensions=2, normalize=False)
             store1.add([[3.0, 4.0]], [{"id": "raw"}])
-            store1.save()
+            store1.save(file_path)
 
             with np.load(file_path, allow_pickle=True) as data:
                 assert data["format_version"].item() == 1
@@ -1507,8 +1336,7 @@ class TestVectorStore:
                 assert data["normalize"].item() is False
                 np.testing.assert_array_equal(data["vectors"][0], np.array([3.0, 4.0]))
 
-            store2 = VectorStore(dimensions=2, file_path=file_path, normalize=False)
-            store2.load()
+            store2 = VectorStore.open(file_path)
 
             np.testing.assert_array_equal(store2.get(0)[0], np.array([3.0, 4.0]))
             assert store2.get(0)[1] == {"id": "raw"}
