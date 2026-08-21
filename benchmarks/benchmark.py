@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import argparse
 import gc
+import hashlib
 import io
 import json
 import os
@@ -172,9 +173,16 @@ def _measure(
     samples = []
     for _ in range(repetitions):
         gc.collect()
-        start = time.perf_counter_ns()
-        result = operation()
-        elapsed = time.perf_counter_ns() - start
+        garbage_collection_enabled = gc.isenabled()
+        if garbage_collection_enabled:
+            gc.disable()
+        try:
+            start = time.perf_counter_ns()
+            result = operation()
+            elapsed = time.perf_counter_ns() - start
+        finally:
+            if garbage_collection_enabled:
+                gc.enable()
         samples.append(elapsed)
         del result
     return samples
@@ -195,10 +203,14 @@ def _measurement(samples_ns: list[int], *, warmup: int) -> dict[str, Any]:
 def _prepared_inputs(
     *, rows: int, dimensions: int, seed: int
 ) -> tuple[np.ndarray, np.ndarray]:
-    generator = np.random.default_rng(seed)
+    generator = np.random.Generator(np.random.PCG64(seed))
     vectors = generator.standard_normal(size=(rows, dimensions), dtype=np.float32)
     metadata = np.arange(rows)
     return vectors, metadata
+
+
+def _array_digest(array: np.ndarray) -> str:
+    return hashlib.sha256(memoryview(array).cast("B")).hexdigest()
 
 
 def _run_ingest(arguments: argparse.Namespace) -> dict[str, Any]:
@@ -239,7 +251,9 @@ def _run_ingest(arguments: argparse.Namespace) -> dict[str, Any]:
             // arguments.batch_size,
             "normalize": arguments.normalize,
             "seed": arguments.seed,
+            "random_generator": "NumPy Generator(PCG64)",
             "prepared_vector_bytes": vectors.nbytes,
+            "prepared_vectors_sha256": _array_digest(vectors),
             "timed_region": "construct VectorStore and call add() for every batch",
         },
         "measurement": measurement,
@@ -252,7 +266,7 @@ def _run_search(arguments: argparse.Namespace) -> dict[str, Any]:
         dimensions=arguments.dimensions,
         seed=arguments.seed,
     )
-    query_generator = np.random.default_rng(arguments.seed + 1)
+    query_generator = np.random.Generator(np.random.PCG64(arguments.seed + 1))
     queries = query_generator.standard_normal(
         size=(arguments.queries, arguments.dimensions), dtype=np.float32
     )
@@ -295,7 +309,10 @@ def _run_search(arguments: argparse.Namespace) -> dict[str, Any]:
             "top_k": arguments.top_k,
             "normalize": arguments.normalize,
             "seed": arguments.seed,
+            "random_generator": "NumPy Generator(PCG64)",
             "stored_vector_bytes": store.vectors.nbytes,
+            "prepared_vectors_sha256": _array_digest(vectors),
+            "prepared_queries_sha256": _array_digest(queries),
             "timed_region": "run every query through the public unfiltered search API",
         },
         "measurement": measurement,

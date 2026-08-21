@@ -1,8 +1,28 @@
 """Tests for the repository performance benchmark commands."""
 
+import gc
 import json
 
 from benchmarks import benchmark
+
+
+def test_measurement_keeps_cyclic_gc_outside_timed_trials():
+    """Test measured operations run without changing the caller's GC state."""
+    collection_states = []
+    garbage_collection_enabled = gc.isenabled()
+    gc.enable()
+    try:
+        benchmark._measure(
+            lambda: collection_states.append(gc.isenabled()),
+            warmup=0,
+            repetitions=2,
+        )
+
+        assert collection_states == [False, False]
+        assert gc.isenabled() is True
+    finally:
+        if not garbage_collection_enabled:
+            gc.disable()
 
 
 def test_ingest_benchmark_reports_workload_and_measurement(capsys):
@@ -28,13 +48,17 @@ def test_ingest_benchmark_reports_workload_and_measurement(capsys):
     assert exit_code == 0
     assert result["schema_version"] == 1
     assert result["benchmark"] == "ingest"
-    assert result["workload"] == {
+    workload = result["workload"]
+    vector_digest = workload.pop("prepared_vectors_sha256")
+    assert len(vector_digest) == 64
+    assert workload == {
         "rows": 4,
         "dimensions": 2,
         "batch_size": 3,
         "add_calls": 2,
         "normalize": True,
         "seed": 20260821,
+        "random_generator": "NumPy Generator(PCG64)",
         "prepared_vector_bytes": 32,
         "timed_region": "construct VectorStore and call add() for every batch",
     }
@@ -72,7 +96,12 @@ def test_search_benchmark_reports_workload_and_per_query_measurement(capsys):
 
     assert exit_code == 0
     assert result["benchmark"] == "search"
-    assert result["workload"] == {
+    workload = result["workload"]
+    vector_digest = workload.pop("prepared_vectors_sha256")
+    query_digest = workload.pop("prepared_queries_sha256")
+    assert len(vector_digest) == 64
+    assert len(query_digest) == 64
+    assert workload == {
         "rows": 4,
         "dimensions": 2,
         "queries_per_trial": 2,
@@ -80,6 +109,7 @@ def test_search_benchmark_reports_workload_and_per_query_measurement(capsys):
         "top_k": 2,
         "normalize": False,
         "seed": 20260821,
+        "random_generator": "NumPy Generator(PCG64)",
         "stored_vector_bytes": 32,
         "timed_region": "run every query through the public unfiltered search API",
     }
