@@ -16,18 +16,59 @@ offers a simple alternative to heavyweight vector databases when you do not need
 network services, indexing infrastructure, ingestion pipelines, or domain-specific
 metadata filtering.
 
-## When/Where?
+## Performance
 
-Below are benchmark results for cosine similarity search to help you assess its
-suitability for your use case.
+`VectorStore` performs exact search over every selected row. The following
+measurements are reference points, not latency guarantees:
 
-| Embedding Type | Dimensions | ~5ms | ~25ms | ~100ms | ~500ms |
-|----------------|------------|------|--------|---------|---------|
-| **Sentence Transformers** | 384 | 1K vectors<br/>1.5MB | 10K vectors<br/>15MB | 100K vectors<br/>147MB | 500K vectors<br/>732MB |
-| **OpenAI Small** | 1536 | 500 vectors<br/>3MB | 5K vectors<br/>29MB | 25K vectors<br/>147MB | 100K vectors<br/>586MB |
-| **OpenAI Large** | 3072 | 200 vectors<br/>2MB | 2.5K vectors<br/>29MB | 5K vectors<br/>59MB | 25K vectors<br/>293MB |
+Each cell shows the median time per cosine query followed by the stored vector
+matrix size:
 
-*Benchmarks performed on Apple M2 hardware.*
+| Rows | 384 dimensions | 1,536 dimensions | 3,072 dimensions |
+|---:|---:|---:|---:|
+| 1,000 | 0.032 ms · 1.5 MB | 0.047 ms · 6.1 MB | 0.083 ms · 12.3 MB |
+| 10,000 | 0.261 ms · 15.4 MB | 0.968 ms · 61.4 MB | 2.022 ms · 122.9 MB |
+| 100,000 | 2.908 ms · 153.6 MB | 9.724 ms · 614.4 MB | 19.941 ms · 1.23 GB |
+
+These benchmarks intentionally stop at 100,000 rows. NumPy Vector Store is
+designed for small-to-medium, in-process exact search; 100,000 rows is an upper
+reference, not a promised limit or a target for continued scaling. The practical
+boundary depends on vector dimensions, metadata, available memory, and latency
+requirements. Workloads that routinely reach millions of vectors generally
+need an indexed or service-backed system.
+
+These are unfiltered `top_k=10` searches on a normalized store. Each row divides
+the median duration of seven measured 20-query trials by 20, after two discarded
+warmup trials. The vector matrix size excludes metadata, temporary search
+arrays, and Python process overhead.
+
+The measurements were taken from commit `801de9a` on a 24 GB Apple M4 Mac mini
+with macOS 26.6.1, CPython 3.13.5, NumPy 2.3.3, and Accelerate BLAS. Hardware,
+operating system activity, Python and NumPy versions, BLAS implementation, and
+thread settings can all change the result.
+
+The repository includes benchmark commands that emit the inputs, environment,
+raw samples, and median as JSON:
+
+```bash
+uv run python benchmarks/benchmark.py search \
+  --rows 10000 --dimensions 384 --queries 20 --top-k 10 \
+  --warmup 2 --repetitions 7 > /tmp/nvs-search.json
+
+uv run python benchmarks/benchmark.py ingest \
+  --rows 10000 --dimensions 384 --batch-size 1 \
+  --warmup 2 --repetitions 7 > /tmp/nvs-ingest.json
+```
+
+For the same 10,000-by-384 prepared input, repeated single-row ingestion had a
+median of 77.3 ms, or about 129,000 rows per second. Supplying 1,000 rows per
+`add()` call had a median of 6.28 ms, or about 1.59 million rows per second.
+Both measurements include construction of a fresh normalized store and every
+`add()` call, but exclude input generation.
+
+See [the benchmark guide](benchmarks/README.md) for the timed regions, complete
+options, output fields, and interpretation notes. The project keeps structural
+complexity checks in CI, but does not fail shared runners on wall-clock timing.
 
 ## Installation
 
