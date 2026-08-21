@@ -176,22 +176,215 @@ every hardware or operating-system failure before data reaches durable storage.
 
 ## 0.5.0: State safety and ingestion
 
-The current public NumPy arrays make inspection convenient, but they also let
-callers mutate normalized vectors and break internal search assumptions.
-Repeated small additions also copy all previously stored data.
+Status: in progress
 
-Planned direction:
+The 0.4 release established the persistence lifecycle and archive contract.
+Version 0.5 will finish that transition, then address a separate ownership
+problem: public arrays currently let callers change normalized vectors, resize
+row storage, or separate vectors from their metadata without validation.
 
-- Remove the unversioned two-array archive reader after its 0.4 migration
-  window.
-- Remove constructor `file_path=`, instance `load()`, and direct
-  context-manager persistence after their 0.4 warning window.
-- Keep vector storage behind private state.
-- Expose read-only views or snapshots for inspection.
-- Make row retrieval safe from accidental mutation.
-- Improve ingestion for repeated additions without penalizing batch insertion.
-- Define deterministic ordering for equal search values.
-- Document thread-safety guarantees and limitations.
+### API at a glance
+
+The intended public surface remains small. Most 0.4 call sites continue to work
+unchanged:
+
+```python
+store = VectorStore(dimensions=1536, normalize=True)
+store.add(vectors, metadata)
+
+hits = store.cosine_search(query, top_k=10)
+hits = store.dot_search(query, top_k=10)
+hits = store.euclidean_search(query, top_k=10)
+
+row = store.get(0)
+store.clear()
+
+store.save("vectors.npz")
+store.save()
+
+loaded = VectorStore.open("vectors.npz")
+loaded.reload()
+```
+
+Configuration and rows remain available for inspection:
+
+```python
+store.dimensions
+store.normalize
+store.file_path
+store.vectors
+store.metadata
+len(store)
+```
+
+The complete change from 0.4 is:
+
+| Area | 0.4 | 0.5 |
+|---|---|---|
+| Create a store | `VectorStore(dimensions, normalize=...)` | Unchanged |
+| Constructor `file_path=` | Works with `FutureWarning` | Removed |
+| Open an archive | `VectorStore.open(path)` | Unchanged |
+| Save and bind | `save(path)` | Unchanged |
+| Save again | `save()` | Unchanged |
+| Refresh from disk | `reload()` | Unchanged |
+| Instance `load()` | Works with `FutureWarning` | Removed |
+| Context manager | Works with `FutureWarning` | Removed |
+| Unversioned archive | Temporary migration reader | Reader removed |
+| Format version 1 archive | Supported | Supported unchanged |
+| `dimensions`, `normalize`, `file_path` | Writable attributes | Read-only properties |
+| `vectors`, `metadata` | Writable owning arrays | Read-only active-row views |
+| Vector returned by `get()` | View into live storage | Independent copy |
+| `add()` | Recopies existing rows | Amortized capacity growth |
+| Equal search values | Unspecified order | Lower store row index first |
+| Thread safety | Not formally defined | Read-only concurrency documented |
+
+The package continues to expose `VectorStore` and `VectorHit`; 0.5 does not add
+a document, state, snapshot, builder, or storage class.
+
+### Persistence bridge removal
+
+Version 0.5 will remove the four compatibility paths that warned throughout
+0.4:
+
+- Constructor `file_path=`. New stores use
+  `VectorStore(dimensions, normalize=...)`, then `save(path)`.
+- Instance `load()`. Existing version 1 archives use `VectorStore.open(path)`,
+  and an already-open store uses `reload()`.
+- Direct context-manager persistence. Explicit `save()` calls remain the only
+  persistence boundary.
+- The reader for unversioned archives containing only `vectors` and `metadata`.
+
+The archive format itself does not change. Version 0.5 continues to read and
+write format version 1. Anyone who still needs an unversioned archive must
+migrate it once with 0.4 using the archive's original dimensions and
+normalization mode, or recreate it from source data. Version 0.5 will not guess
+configuration that the old file did not record.
+
+The readable `file_path` attribute remains as the name of a store's current
+binding; removing the constructor argument does not require a second `path`
+convention. Only `open(path)` and a successful `save(path)` establish or change
+that binding.
+
+### Store-owned configuration and rows
+
+Version 0.5 will move configuration, path binding, vectors, and metadata behind
+private state. The existing public names remain available for inspection:
+
+- `dimensions`, `normalize`, and `file_path` become read-only properties.
+  Callers can inspect the store's configuration and binding but cannot bypass
+  the constructor, archive validation, or Save As behavior by assigning to
+  them.
+- `vectors` returns a read-only NumPy view over the active vector rows. Spare
+  ingestion capacity, if any, is never exposed.
+- `metadata` returns a read-only one-dimensional object-array view over the
+  active metadata rows.
+
+These array views describe the store at the time they are requested. Code that
+keeps a view across `add()`, `clear()`, or `reload()` must request a new view
+before assuming it represents current rows. The returned arrays reject element,
+shape, and ordering changes through the public reference.
+
+Read-only metadata protects the store's row structure, not the contents of an
+opaque Python payload. A dict, list, dataclass, or application object remains
+the same object supplied by the caller. The library will not deep-copy or
+freeze arbitrary metadata objects.
+
+In practice, matrix inspection and row retrieval have different ownership:
+
+```python
+vectors = store.vectors
+metadata = store.metadata
+
+vectors[0, 0] = 10.0       # Rejected: read-only view
+metadata[0] = replacement  # Rejected: read-only row structure
+
+vector, payload = store.get(0)
+vector[0] = 10.0           # Allowed: independent copy
+payload["reviewed"] = True  # Allowed: shared opaque metadata object
+```
+
+Applications that need immutable metadata can store frozen application objects
+or copy payloads at their own boundary. The vector store will not impose one
+copying policy on every metadata type.
+
+### Safe row retrieval
+
+`get(index)` keeps its existing return shape: a `(vector, metadata)` tuple for a
+valid row and `None` for an index outside the store. The vector becomes an
+independent `float32` copy. Changing it cannot change the stored row, and later
+store operations cannot invalidate it.
+
+The metadata payload remains a shared opaque object, matching the behavior of
+search hits and the `metadata` view. This distinction avoids an expensive and
+often incorrect promise that the library knows how to copy application-defined
+objects.
+
+### Amortized repeated ingestion
+
+The current implementation concatenates vectors and metadata on every
+noninitial `add()`. Repeated single-row additions therefore recopy all earlier
+rows each time, even though search ultimately needs one contiguous matrix.
+
+Version 0.5 will keep private contiguous vector and metadata storage with an
+active row count and spare capacity. When an incoming batch fits, `add()` writes
+it into available storage. When it does not fit, the store grows geometrically
+and copies active rows once. This makes repeated additions amortized instead of
+moving the full store for every call, while preserving efficient first and
+large-batch insertion.
+
+Capacity is an implementation detail. Public inspection, `len()`, search,
+`get()`, and persistence operate only on active rows. `clear()` returns the
+store to empty storage and releases retained row capacity rather than keeping
+references to application data indefinitely. The `add()` signature,
+normalization, validation, and metadata-row semantics do not change.
+
+Chunked storage is deliberately out of scope. It would make writes cheap by
+moving concatenation into search and persistence, or require a second cached
+representation with invalidation rules. One contiguous representation better
+fits a library whose primary operation is exact NumPy search.
+
+### Deterministic equal-value ordering
+
+Version 0.5 will define one ordering rule for exact metric ties:
+
+- Cosine and dot searches order larger values first.
+- Euclidean search orders smaller values first.
+- Rows with equal computed values are ordered by ascending original store row
+  index.
+
+The row-index tie break also determines which rows are included when equal
+values cross the `top_k` boundary. Filtered searches use the original store
+index rather than the position or order supplied through `within_rows`. Search
+results therefore remain reproducible without changing how non-tied values are
+ranked.
+
+### Thread-safety boundary
+
+`VectorStore` will not add internal locking in 0.5. Multiple threads may use
+search, `get()`, and the read-only inspection properties on the same instance
+while its state and metadata payloads remain unchanged.
+
+Applications must provide their own synchronization whenever another thread
+may call `add()`, `clear()`, `reload()`, or `save()`, or mutate a metadata
+payload shared with the store. This includes serializing a save with in-memory
+mutation so the archive cannot observe vectors and metadata at different
+logical moments.
+
+Atomic archive replacement remains a file-visibility guarantee, not an object
+or multi-writer lock. Separate stores writing the same destination can still
+replace one another, and the last successful replacement wins.
+
+### Explicit non-goals
+
+Version 0.5 will not add update or delete operations, a separate builder,
+streaming or async ingestion, internal locks, or multi-writer coordination. It
+will not deep-copy opaque metadata. These features are not needed to establish
+safe ownership and amortized addition, and adding them now would widen the API
+before the existing core reaches stabilization.
+
+State encapsulation and spare capacity do not change serialized data, so format
+version 1 remains sufficient. Broader validation and exception consistency stay
+in the 0.6 stabilization milestone.
 
 ## 0.6.0: API stabilization
 
