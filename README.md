@@ -30,6 +30,13 @@ matrix size:
 | 10,000 | 0.261 ms · 15.4 MB | 0.968 ms · 61.4 MB | 2.022 ms · 122.9 MB |
 | 100,000 | 2.908 ms · 153.6 MB | 9.724 ms · 614.4 MB | 19.941 ms · 1.23 GB |
 
+These benchmarks intentionally stop at 100,000 rows. NumPy Vector Store is
+designed for small-to-medium, in-process exact search; 100,000 rows is an upper
+reference, not a promised limit or a target for continued scaling. The practical
+boundary depends on vector dimensions, metadata, available memory, and latency
+requirements. Workloads that routinely reach millions of vectors generally
+need an indexed or service-backed system.
+
 These are unfiltered `top_k=10` searches on a normalized store. Each row divides
 the median duration of seven measured 20-query trials by 20, after two discarded
 warmup trials. The vector matrix size excludes metadata, temporary search
