@@ -68,6 +68,7 @@ class VectorStore(Generic[TMetadata]):
             (0, dimensions), dtype=np.float32
         )
         self._metadata: npt.NDArray[Any] = np.array([], dtype=object)
+        self._row_count = 0
         self._lock_row_storage()
 
     @property
@@ -88,14 +89,14 @@ class VectorStore(Generic[TMetadata]):
     @property
     def vectors(self) -> npt.NDArray[np.float32]:
         """Return a zero-copy, non-writeable view of the current vectors."""
-        view = self._vectors.view()
+        view = self._vectors[: self._row_count]
         view.flags.writeable = False
         return view
 
     @property
     def metadata(self) -> npt.NDArray[Any]:
         """Return a zero-copy, non-writeable view of the current metadata rows."""
-        view = self._metadata.view()
+        view = self._metadata[: self._row_count]
         view.flags.writeable = False
         return view
 
@@ -143,15 +144,7 @@ class VectorStore(Generic[TMetadata]):
             non_finite_error_message="Cannot add vectors containing non-finite values",
         )
 
-        if len(self._vectors) == 0:
-            combined_vectors = vectors_to_store
-        else:
-            combined_vectors = np.vstack([self._vectors, vectors_to_store]).astype(
-                np.float32, copy=False
-            )
-
-        combined_metadata = np.append(self._metadata, metadata_array)
-        self._replace_rows(combined_vectors, combined_metadata)
+        self._append_rows(vectors_to_store, metadata_array)
 
     def reload(self) -> None:
         """Refresh this store from its bound archive path."""
@@ -300,7 +293,7 @@ class VectorStore(Generic[TMetadata]):
 
     def get(self, index: int) -> tuple[npt.NDArray[np.float32], TMetadata] | None:
         """Get a stored vector and metadata payload by row index."""
-        if 0 <= index < len(self._vectors):
+        if 0 <= index < self._row_count:
             return (self._vectors[index].copy(), self._metadata[index])
         return None
 
@@ -313,7 +306,55 @@ class VectorStore(Generic[TMetadata]):
 
     def __len__(self) -> int:
         """Return the number of stored vector rows."""
-        return len(self._vectors)
+        return self._row_count
+
+    def _append_rows(
+        self,
+        vectors: npt.NDArray[np.float32],
+        metadata: npt.NDArray[Any],
+    ) -> None:
+        added_count = len(vectors)
+        if added_count == 0:
+            return
+
+        if self._row_count == 0 and len(self._vectors) == 0:
+            self._replace_rows(vectors, metadata)
+            return
+
+        required_capacity = self._row_count + added_count
+        if required_capacity > len(self._vectors):
+            self._grow_and_append(vectors, metadata, required_capacity)
+            return
+
+        start = self._row_count
+        self._vectors.flags.writeable = True
+        try:
+            self._metadata.flags.writeable = True
+            self._vectors[start:required_capacity] = vectors
+            self._metadata[start:required_capacity] = metadata
+        finally:
+            self._lock_row_storage()
+        self._row_count = required_capacity
+
+    def _grow_and_append(
+        self,
+        vectors: npt.NDArray[np.float32],
+        metadata: npt.NDArray[Any],
+        required_capacity: int,
+    ) -> None:
+        new_capacity = max(required_capacity, len(self._vectors) * 2)
+        new_vectors = np.empty((new_capacity, self._dimensions), dtype=np.float32)
+        new_metadata = np.empty(new_capacity, dtype=object)
+
+        new_vectors[: self._row_count] = self._vectors[: self._row_count]
+        new_metadata[: self._row_count] = self._metadata[: self._row_count]
+        new_vectors[self._row_count : required_capacity] = vectors
+        new_metadata[self._row_count : required_capacity] = metadata
+
+        self._vectors = new_vectors
+        self._metadata = new_metadata
+        self._row_count = required_capacity
+        self._lock_row_storage()
 
     def _replace_rows(
         self,
@@ -322,6 +363,7 @@ class VectorStore(Generic[TMetadata]):
     ) -> None:
         self._vectors = vectors
         self._metadata = metadata
+        self._row_count = len(vectors)
         self._lock_row_storage()
 
     def _lock_row_storage(self) -> None:
@@ -437,7 +479,7 @@ class VectorStore(Generic[TMetadata]):
             raise ValueError("within_rows must contain integer row indexes")
 
         rows = rows.astype(np.intp, copy=False)
-        if np.any(rows < 0) or np.any(rows >= len(self._vectors)):
+        if np.any(rows < 0) or np.any(rows >= self._row_count):
             raise IndexError("within_rows contains row indexes outside the store")
         return rows
 
@@ -462,11 +504,11 @@ class VectorStore(Generic[TMetadata]):
         if top_k <= 0:
             raise ValueError("top_k must be greater than 0")
 
-        if len(self._vectors) == 0:
+        if self._row_count == 0:
             return []
 
         row_indices = None
-        selected_vectors = self._vectors
+        selected_vectors = self._vectors[: self._row_count]
         if within_rows is not None:
             row_indices = self._normalize_within_rows(within_rows)
             if len(row_indices) == 0:
@@ -589,8 +631,10 @@ class VectorStore(Generic[TMetadata]):
                     format_version=np.array(_ARCHIVE_FORMAT_VERSION, dtype=np.int64),
                     dimensions=np.array(self._dimensions, dtype=np.int64),
                     normalize=np.array(self._normalize, dtype=np.bool_),
-                    vectors=self._vectors.astype(np.float32, copy=False),
-                    metadata=np.array(self._metadata, copy=True),
+                    vectors=self._vectors[: self._row_count].astype(
+                        np.float32, copy=False
+                    ),
+                    metadata=np.array(self._metadata[: self._row_count], copy=True),
                 )
             if destination_mode is not None:
                 temporary_path.chmod(destination_mode)
