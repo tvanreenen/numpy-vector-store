@@ -524,6 +524,65 @@ class TestVectorStore:
         assert [hit.index for hit in dot_results] == [2, 1]
         assert [hit.index for hit in euclidean_results] == [1, 2]
 
+    @pytest.mark.parametrize(
+        ("search_name", "query"),
+        [
+            ("cosine_search", [1.0, 0.0]),
+            ("dot_search", [1.0, 0.0]),
+            ("euclidean_search", [0.0, 0.0]),
+        ],
+    )
+    def test_metric_ties_use_lower_store_indices_at_top_k_boundary(
+        self, search_name, query
+    ):
+        """Test exact ties select lower row indexes, including after filtering."""
+        store = VectorStore[int](dimensions=2, normalize=False)
+        store.add(np.tile([[1.0, 0.0]], (8, 1)), np.arange(8))
+        search = getattr(store, search_name)
+
+        results = search(query, top_k=3)
+        filtered_results = search(
+            query,
+            top_k=3,
+            within_rows=[7, 3, 5, 1, 6, 0, 4, 2],
+        )
+        all_results = search(query, top_k=10)
+
+        assert [hit.index for hit in results] == [0, 1, 2]
+        assert [hit.index for hit in filtered_results] == [0, 1, 2]
+        assert [hit.index for hit in all_results] == list(range(8))
+
+    @pytest.mark.parametrize(
+        ("search_name", "vectors", "query"),
+        [
+            (
+                "cosine_search",
+                [[1.0, 1.0], [1.0, 0.0], [1.0, 1.0], [1.0, 1.0], [0.0, 1.0]],
+                [1.0, 0.0],
+            ),
+            (
+                "dot_search",
+                [[2.0, 0.0], [3.0, 0.0], [2.0, 1.0], [2.0, -1.0], [1.0, 0.0]],
+                [1.0, 0.0],
+            ),
+            (
+                "euclidean_search",
+                [[1.0, 0.0], [0.0, 0.0], [0.0, 1.0], [-1.0, 0.0], [2.0, 0.0]],
+                [0.0, 0.0],
+            ),
+        ],
+    )
+    def test_metric_values_remain_primary_before_row_index_ties(
+        self, search_name, vectors, query
+    ):
+        """Test the row-index tie break cannot outrank a better metric value."""
+        store = VectorStore[int](dimensions=2, normalize=False)
+        store.add(vectors, np.arange(len(vectors)))
+
+        results = getattr(store, search_name)(query, top_k=3)
+
+        assert [hit.index for hit in results] == [1, 0, 2]
+
     def test_unfiltered_metric_search_uses_stored_vector_matrix(self):
         """Test an unfiltered search does not copy the complete vector matrix."""
         store = VectorStore[int](dimensions=2, normalize=False)
