@@ -665,6 +665,27 @@ class TestVectorStore:
         with pytest.raises(IndexError, match="outside"):
             store.euclidean_search([1.0, 0.0], within_rows=[1])
 
+        results = store.dot_search(
+            [1.0, 0.0], top_k=np.int64(1), min_value=np.float32(0.5)
+        )
+        assert [hit.index for hit in results] == [0]
+
+    @pytest.mark.parametrize(
+        "search_name", ["cosine_search", "dot_search", "euclidean_search"]
+    )
+    @pytest.mark.parametrize("top_k", [True, np.bool_(True), 1.5, "1"])
+    @pytest.mark.parametrize("populated", [False, True])
+    def test_metric_searches_reject_non_integer_top_k(
+        self, search_name, top_k, populated
+    ):
+        """Test top_k validation does not depend on whether rows exist."""
+        store = VectorStore(dimensions=2)
+        if populated:
+            store.add([[1.0, 0.0]], [{"id": "x"}])
+
+        with pytest.raises(TypeError, match="top_k must be an integer"):
+            getattr(store, search_name)([1.0, 0.0], top_k=top_k)
+
     @pytest.mark.parametrize(
         "search_name", ["cosine_search", "dot_search", "euclidean_search"]
     )
@@ -706,6 +727,26 @@ class TestVectorStore:
         with pytest.raises(ValueError, match=threshold_name):
             getattr(store, search_name)([1.0, 0.0], **{threshold_name: non_finite})
 
+    @pytest.mark.parametrize(
+        ("search_name", "threshold_name"),
+        [
+            ("cosine_search", "min_value"),
+            ("dot_search", "min_value"),
+            ("euclidean_search", "max_value"),
+        ],
+    )
+    @pytest.mark.parametrize(
+        "threshold", [True, np.bool_(True), "0.5", 0.5 + 0.0j, np.array(0.5)]
+    )
+    def test_metric_searches_reject_non_real_thresholds(
+        self, search_name, threshold_name, threshold
+    ):
+        """Test thresholds require real scalars even when the store is empty."""
+        store = VectorStore(dimensions=2)
+
+        with pytest.raises(TypeError, match=f"{threshold_name} must be a real number"):
+            getattr(store, search_name)([1.0, 0.0], **{threshold_name: threshold})
+
     def test_get(self):
         """Test retrieving vector and metadata by index."""
         store = VectorStore(dimensions=2)
@@ -713,7 +754,7 @@ class TestVectorStore:
         metadata = {"test": "data"}
         add_single_vector(store, vector, metadata)
 
-        entry = store.get(0)
+        entry = store.get(np.int64(0))
 
         assert entry is not None
         retrieved_vector, retrieved_metadata = entry
@@ -722,6 +763,17 @@ class TestVectorStore:
         )
         assert retrieved_metadata == metadata
         assert store.get(1) is None
+
+    @pytest.mark.parametrize("index", [True, np.bool_(True), 0.0, "0"])
+    @pytest.mark.parametrize("populated", [False, True])
+    def test_get_rejects_non_integer_indexes(self, index, populated):
+        """Test retrieval cannot leak NumPy boolean indexing semantics."""
+        store = VectorStore(dimensions=2)
+        if populated:
+            store.add([[1.0, 0.0]], [{"id": "x"}])
+
+        with pytest.raises(TypeError, match="index must be an integer"):
+            store.get(index)
 
     def test_get_returns_an_independent_vector_and_shared_metadata(self):
         """Test callers own retrieved vectors but not opaque metadata payloads."""

@@ -5,6 +5,7 @@ import os
 import stat
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass
+from numbers import Real
 from pathlib import Path
 from typing import Any, Generic, SupportsIndex, TypeVar
 from uuid import uuid4
@@ -170,7 +171,7 @@ class VectorStore(Generic[TMetadata]):
         self,
         query: npt.ArrayLike,
         *,
-        top_k: int = 10,
+        top_k: SupportsIndex = 10,
         min_value: float | None = None,
         within_rows: Sequence[int] | npt.NDArray[np.integer[Any]] | None = None,
     ) -> list[VectorHit[TMetadata]]:
@@ -197,7 +198,7 @@ class VectorStore(Generic[TMetadata]):
         self,
         query: npt.ArrayLike,
         *,
-        top_k: int = 10,
+        top_k: SupportsIndex = 10,
         min_value: float | None = None,
         within_rows: Sequence[int] | npt.NDArray[np.integer[Any]] | None = None,
     ) -> list[VectorHit[TMetadata]]:
@@ -221,7 +222,7 @@ class VectorStore(Generic[TMetadata]):
         self,
         query: npt.ArrayLike,
         *,
-        top_k: int = 10,
+        top_k: SupportsIndex = 10,
         max_value: float | None = None,
         within_rows: Sequence[int] | npt.NDArray[np.integer[Any]] | None = None,
     ) -> list[VectorHit[TMetadata]]:
@@ -294,8 +295,11 @@ class VectorStore(Generic[TMetadata]):
             np.subtract(vectors, query, out=differences, dtype=np.float64)
         return np.asarray(np.linalg.norm(differences, axis=1), dtype=np.float64)
 
-    def get(self, index: int) -> tuple[npt.NDArray[np.float32], TMetadata] | None:
+    def get(
+        self, index: SupportsIndex
+    ) -> tuple[npt.NDArray[np.float32], TMetadata] | None:
         """Get a stored vector and metadata payload by row index."""
+        index = self._validate_integer(index, name="index")
         if 0 <= index < self._row_count:
             return (self._vectors[index].copy(), self._metadata[index])
         return None
@@ -469,6 +473,8 @@ class VectorStore(Generic[TMetadata]):
         if value is None:
             return None
 
+        if isinstance(value, (bool, np.bool_)) or not isinstance(value, Real):
+            raise TypeError(f"{name} must be a real number")
         value = float(value)
         if not np.isfinite(value):
             raise ValueError(f"{name} must be finite")
@@ -505,7 +511,7 @@ class VectorStore(Generic[TMetadata]):
         self,
         query: npt.ArrayLike,
         *,
-        top_k: int,
+        top_k: SupportsIndex,
         within_rows: Sequence[int] | npt.NDArray[np.integer[Any]] | None,
         values_fn: Callable[
             [npt.NDArray[np.float32], npt.NDArray[np.float32]],
@@ -516,11 +522,12 @@ class VectorStore(Generic[TMetadata]):
         max_value: float | None,
     ) -> list[VectorHit[TMetadata]]:
         query_vector = self._validate_query(query)
-        min_value = self._validate_search_threshold(min_value, name="min_value")
-        max_value = self._validate_search_threshold(max_value, name="max_value")
-
+        top_k = self._validate_integer(top_k, name="top_k")
         if top_k <= 0:
             raise ValueError("top_k must be greater than 0")
+
+        min_value = self._validate_search_threshold(min_value, name="min_value")
+        max_value = self._validate_search_threshold(max_value, name="max_value")
 
         if self._row_count == 0:
             return []
