@@ -328,14 +328,14 @@ objects.
 
 ### Amortized repeated ingestion
 
-The current implementation concatenates vectors and metadata on every
-noninitial `add()`. Repeated single-row additions therefore recopy all earlier
+Through 0.4, the implementation concatenated vectors and metadata on every
+noninitial `add()`. Repeated single-row additions therefore recopied all earlier
 rows each time, even though search ultimately needs one contiguous matrix.
 
-Version 0.5 will keep private contiguous vector and metadata storage with an
-active row count and spare capacity. When an incoming batch fits, `add()` writes
-it into available storage. When it does not fit, the store grows geometrically
-and copies active rows once. This makes repeated additions amortized instead of
+Version 0.5 keeps private contiguous vector and metadata storage with an active
+row count and spare capacity. When an incoming batch fits, `add()` writes it
+into available storage. When it does not fit, the store grows geometrically and
+copies active rows once. This makes repeated additions amortized instead of
 moving the full store for every call, while preserving efficient first and
 large-batch insertion.
 

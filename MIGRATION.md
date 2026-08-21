@@ -39,6 +39,7 @@ The persistence changes from 0.4 to 0.5 are:
 | `dimensions`, `normalize`, `file_path` | Writable attributes | Read-only properties |
 | `vectors`, `metadata` | Writable owning arrays | Read-only inspection views |
 | Vector returned by `get()` | View into live storage | Independent `float32` copy |
+| Repeated `add()` calls | Recopy all existing rows | Reuse private spare capacity |
 
 ## Store-owned state
 
@@ -79,6 +80,21 @@ the caller clear ownership at bounded cost. Metadata can be any Python object,
 so the store preserves payload identity instead of imposing a potentially
 expensive or invalid deep-copy policy. Applications that need immutable
 metadata can use frozen application objects or copy payloads themselves.
+
+## Repeated additions
+
+The `add(vectors, metadata)` signature and validation rules do not change. In
+0.4, every noninitial call concatenated the new rows with the complete store.
+In 0.5, the store reserves private row capacity and grows it geometrically when
+needed. Repeated small additions therefore copy existing rows only when the
+current allocation is full.
+
+This does not add a public capacity setting or change row indexes. `len(store)`,
+inspection, search, retrieval, and persistence continue to use only active
+rows. `clear()` discards reserved storage as well as active rows, so it does not
+retain metadata payloads through unused capacity. A caller-held inspection view
+can still keep its previous NumPy buffer and payload references alive until the
+view itself is released.
 
 ## Creating and saving a new store
 

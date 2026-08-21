@@ -83,6 +83,39 @@ class TestVectorStore:
         assert len(store) == 2
         assert store.get(1)[1] == {"id": 2}
 
+    def test_repeated_additions_grow_geometrically_and_reuse_capacity(self):
+        """Test repeated additions do not reallocate row storage every time."""
+        store = VectorStore[int](dimensions=2, normalize=False)
+        allocations = []
+
+        for index in range(5):
+            store.add([[float(index + 1), 0.0]], [index])
+            allocations.append((store._vectors, store._metadata))
+
+        assert [len(vectors) for vectors, _ in allocations] == [1, 2, 4, 4, 8]
+        assert allocations[2][0] is allocations[3][0]
+        assert allocations[2][1] is allocations[3][1]
+        assert allocations[3][0] is not allocations[4][0]
+        assert allocations[3][1] is not allocations[4][1]
+        assert store._vectors.flags.writeable is False
+        assert store._metadata.flags.writeable is False
+        np.testing.assert_array_equal(
+            store.vectors,
+            np.array([[1.0, 0.0], [2.0, 0.0], [3.0, 0.0], [4.0, 0.0], [5.0, 0.0]]),
+        )
+        assert store.metadata.tolist() == [0, 1, 2, 3, 4]
+
+    def test_large_batch_growth_allocates_only_the_required_rows(self):
+        """Test a batch larger than geometric growth is stored in one allocation."""
+        store = VectorStore[int](dimensions=2, normalize=False)
+        store.add([[1.0, 0.0]], [0])
+
+        store.add(np.ones((5, 2), dtype=np.float32), [1, 2, 3, 4, 5])
+
+        assert len(store) == 6
+        assert len(store._vectors) == 6
+        assert len(store._metadata) == 6
+
     def test_add_normalizes_vectors(self):
         """Test add normalizes vectors at insert time."""
         store = VectorStore[dict[str, str]](dimensions=2)
@@ -657,15 +690,17 @@ class TestVectorStore:
         """Test mutation requires a fresh view to inspect the current rows."""
         store = VectorStore[int](dimensions=2, normalize=False)
         store.add([[1.0, 0.0]], [1])
+        store.add([[2.0, 0.0]], [2])
+        store.add([[3.0, 0.0]], [3])
         vectors = store.vectors
         metadata = store.metadata
 
-        store.add([[0.0, 1.0]], [2])
+        store.add([[4.0, 0.0]], [4])
 
-        assert vectors.shape == (1, 2)
-        assert metadata.tolist() == [1]
-        assert store.vectors.shape == (2, 2)
-        assert store.metadata.tolist() == [1, 2]
+        assert vectors.shape == (3, 2)
+        assert metadata.tolist() == [1, 2, 3]
+        assert store.vectors.shape == (4, 2)
+        assert store.metadata.tolist() == [1, 2, 3, 4]
 
     def test_row_inspection_copies_are_independently_mutable(self):
         """Test explicit full-array copies cannot change store-owned rows."""
@@ -681,14 +716,43 @@ class TestVectorStore:
         assert store.metadata[0] == {"id": 1}
 
     def test_clear(self):
-        """Test clearing the store."""
-        store = VectorStore(dimensions=2)
-        add_single_vector(store, np.array([1.0, 2.0]))
+        """Test clearing the store releases active rows and spare capacity."""
+        store = VectorStore(dimensions=2, normalize=False)
+        for index in range(3):
+            add_single_vector(store, np.array([float(index), 1.0]))
+        assert len(store._vectors) == 4
 
         store.clear()
 
+        assert len(store) == 0
         assert len(store.vectors) == 0
         assert len(store.metadata) == 0
+        assert store._vectors.shape == (0, 2)
+        assert store._metadata.shape == (0,)
+
+    def test_spare_capacity_is_not_searched_retrieved_or_persisted(self, tmp_path):
+        """Test every row consumer is limited to initialized active rows."""
+        file_path = tmp_path / "vectors.npz"
+        store = VectorStore[int](dimensions=2, normalize=False)
+        for index in range(3):
+            store.add([[float(index + 1), 1.0]], [index])
+        assert len(store._vectors) == 4
+
+        hits = store.dot_search([1.0, 0.0], top_k=10)
+        store.save(file_path)
+
+        assert len(store) == 3
+        assert store.vectors.shape == (3, 2)
+        assert store.metadata.tolist() == [0, 1, 2]
+        assert store.get(3) is None
+        assert {hit.index for hit in hits} == {0, 1, 2}
+        with pytest.raises(IndexError, match="outside the store"):
+            store.dot_search([1.0, 0.0], within_rows=[3])
+        with np.load(file_path, allow_pickle=True) as data:
+            assert data["vectors"].shape == (3, 2)
+            assert data["metadata"].tolist() == [0, 1, 2]
+        loaded = VectorStore[int].open(file_path)
+        assert len(loaded) == 3
 
     def test_save_and_load(self):
         """Test saving and loading vectors."""
