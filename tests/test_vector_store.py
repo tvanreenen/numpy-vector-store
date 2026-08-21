@@ -32,6 +32,16 @@ class IndexValue:
         return self.value
 
 
+@dataclass
+class StringPath:
+    """Custom string path-like value used to exercise persistence inputs."""
+
+    value: str
+
+    def __fspath__(self):
+        return self.value
+
+
 def add_single_vector(store, vector, metadata=None):
     """Helper function to add a single vector."""
     store.add(np.atleast_2d(vector), [metadata or {}])
@@ -1030,6 +1040,62 @@ class TestVectorStore:
         assert len(store2) == 1
         assert store2.get(0)[1] == {"id": "test"}
 
+    def test_save_and_open_accept_string_path_like_values(self, tmp_path):
+        """Test persistence accepts the standard string path protocol."""
+        extensionless_path = StringPath(str(tmp_path / "path-like-vectors"))
+        expected_path = tmp_path / "path-like-vectors.npz"
+        store = VectorStore(dimensions=2)
+        store.add([[1.0, 0.0]], [{"id": "persisted"}])
+
+        store.save(extensionless_path)
+        opened = VectorStore.open(extensionless_path)
+
+        assert store.file_path == expected_path
+        assert opened.file_path == expected_path
+        assert opened.get(0)[1] == {"id": "persisted"}
+
+    @pytest.mark.parametrize("invalid_path", [None, 0, False, b"vectors", object()])
+    def test_open_rejects_non_path_inputs(self, invalid_path):
+        """Test open distinguishes invalid types from empty paths."""
+        with pytest.raises(TypeError, match="string or path-like"):
+            VectorStore.open(invalid_path)  # type: ignore[arg-type]
+
+    @pytest.mark.parametrize("empty_path", ["", StringPath("")])
+    def test_open_rejects_empty_path_values(self, empty_path):
+        """Test open rejects empty strings before path normalization."""
+        with pytest.raises(ValueError, match="path must not be empty"):
+            VectorStore.open(empty_path)
+
+    @pytest.mark.parametrize("invalid_path", [0, False, b"vectors", object()])
+    def test_save_rejects_non_path_inputs_without_rebinding(
+        self, tmp_path, invalid_path
+    ):
+        """Test invalid Save As types cannot replace an existing binding."""
+        original_path = tmp_path / "original.npz"
+        store = VectorStore(dimensions=2)
+        store.save(original_path)
+
+        with pytest.raises(TypeError, match="string or path-like"):
+            store.save(invalid_path)  # type: ignore[arg-type]
+
+        assert store.file_path == original_path
+        assert original_path.exists()
+
+    @pytest.mark.parametrize("empty_path", ["", StringPath("")])
+    def test_save_rejects_empty_path_values_without_rebinding(
+        self, tmp_path, empty_path
+    ):
+        """Test an empty Save As path is not mistaken for omitted path."""
+        original_path = tmp_path / "original.npz"
+        store = VectorStore(dimensions=2)
+        store.save(original_path)
+
+        with pytest.raises(ValueError, match="path must not be empty"):
+            store.save(empty_path)
+
+        assert store.file_path == original_path
+        assert original_path.exists()
+
     def test_save_with_path_binds_an_unbound_store(self, tmp_path):
         """Test the preferred first save writes and binds its destination."""
         extensionless_path = tmp_path / "vectors"
@@ -1275,11 +1341,6 @@ class TestVectorStore:
         """Test open fails clearly when its resolved archive does not exist."""
         with pytest.raises(FileNotFoundError):
             VectorStore.open(tmp_path / "missing")
-
-    def test_open_rejects_empty_path(self):
-        """Test open requires a meaningful archive path."""
-        with pytest.raises(ValueError, match="path"):
-            VectorStore.open("")
 
     def test_open_rejects_unversioned_archive(self, tmp_path):
         """Test open requires the self-describing version 1 schema."""
@@ -1670,10 +1731,10 @@ class TestVectorStore:
             store.save()
 
     def test_save_rejects_empty_file_path(self):
-        """Test an explicit empty path cannot bind a store."""
+        """Test an explicit empty path is not treated like omitted save()."""
         store = VectorStore(dimensions=2)
 
-        with pytest.raises(ValueError, match="file path"):
+        with pytest.raises(ValueError, match="path must not be empty"):
             store.save("")
 
     def test_save_empty_vectors(self):

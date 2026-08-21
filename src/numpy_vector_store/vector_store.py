@@ -14,6 +14,7 @@ import numpy.typing as npt
 
 TMetadata = TypeVar("TMetadata")
 _RealScalar: TypeAlias = int | float | np.integer[Any] | np.floating[Any]
+_PathInput: TypeAlias = str | os.PathLike[str]
 
 _ARCHIVE_FORMAT_VERSION = 1
 _ARCHIVE_FIELDS = frozenset(
@@ -105,11 +106,9 @@ class VectorStore(Generic[TMetadata]):
         return view
 
     @classmethod
-    def open(cls, path: str | Path) -> VectorStore[TMetadata]:
+    def open(cls, path: _PathInput) -> VectorStore[TMetadata]:
         """Open a store from a versioned, self-describing archive."""
         resolved_path = cls._resolve_file_path(path)
-        if resolved_path is None:
-            raise ValueError("path must not be empty")
 
         archive = cls._read_archive(resolved_path)
         store = cls(dimensions=archive.dimensions, normalize=archive.normalize)
@@ -158,7 +157,7 @@ class VectorStore(Generic[TMetadata]):
         archive = self._read_archive(self._file_path)
         self._replace_with_archive(archive)
 
-    def save(self, path: str | Path | None = None) -> None:
+    def save(self, path: _PathInput | None = None) -> None:
         """Save the store and bind an explicitly supplied destination path."""
         destination = self._file_path if path is None else self._resolve_file_path(path)
         if destination is None:
@@ -394,11 +393,17 @@ class VectorStore(Generic[TMetadata]):
         return metadata_array
 
     @staticmethod
-    def _resolve_file_path(file_path: str | Path | None) -> Path | None:
-        if not file_path:
-            return None
+    def _resolve_file_path(file_path: _PathInput) -> Path:
+        try:
+            raw_path = os.fspath(file_path)
+        except TypeError:
+            raise TypeError("path must be a string or path-like object") from None
+        if not isinstance(raw_path, str):
+            raise TypeError("path must be a string or path-like object")
+        if not raw_path:
+            raise ValueError("path must not be empty")
 
-        path = Path(file_path)
+        path = Path(raw_path)
         if path.suffix != ".npz":
             return Path(f"{path}.npz")
         return path
