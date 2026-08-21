@@ -22,6 +22,16 @@ class MetadataRecord:
     label: str
 
 
+@dataclass
+class IndexValue:
+    """Custom integer-index value used to exercise selector fallback behavior."""
+
+    value: int
+
+    def __index__(self):
+        return self.value
+
+
 def add_single_vector(store, vector, metadata=None):
     """Helper function to add a single vector."""
     store.add(np.atleast_2d(vector), [metadata or {}])
@@ -697,6 +707,45 @@ class TestVectorStore:
 
         with pytest.raises(IndexError, match="outside"):
             getattr(store, search_name)([1.0, 0.0], within_rows=[len(store)])
+
+    def test_native_integer_row_selectors_remain_zero_copy(self):
+        """Test common NumPy selectors stay on the vectorized validation path."""
+        store = VectorStore(dimensions=2)
+        store.add([[1.0, 0.0], [0.0, 1.0]], ["x", "y"])
+        rows = np.array([1, 0], dtype=np.intp)
+
+        normalized_rows = store._normalize_within_rows(rows)
+
+        assert np.shares_memory(normalized_rows, rows)
+
+    def test_row_selectors_accept_generic_integer_index_values(self):
+        """Test object-valued selectors use the integer-index fallback."""
+        store = VectorStore(dimensions=2)
+        store.add([[1.0, 0.0], [0.0, 1.0]], ["x", "y"])
+
+        results = store.cosine_search(
+            [1.0, 0.0], within_rows=[IndexValue(0), IndexValue(1)]
+        )
+
+        assert [hit.index for hit in results] == [0, 1]
+
+    @pytest.mark.parametrize(
+        ("within_rows", "exception", "message"),
+        [
+            ([IndexValue(0), object()], TypeError, "integer"),
+            ([IndexValue(0), IndexValue(0)], ValueError, "unique"),
+            ([IndexValue(2)], IndexError, "outside"),
+        ],
+    )
+    def test_generic_integer_row_selectors_preserve_failure_contracts(
+        self, within_rows, exception, message
+    ):
+        """Test fallback validation matches native selector failures."""
+        store = VectorStore(dimensions=2)
+        store.add([[1.0, 0.0], [0.0, 1.0]], ["x", "y"])
+
+        with pytest.raises(exception, match=message):
+            store.cosine_search([1.0, 0.0], within_rows=within_rows)
 
     @pytest.mark.parametrize(
         ("search_name", "normalize"),
