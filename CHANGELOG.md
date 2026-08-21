@@ -4,6 +4,137 @@ This changelog records user-visible changes to NumPy Vector Store. Earlier
 release notes remain available on the
 [GitHub releases page](https://github.com/tvanreenen/numpy-vector-store/releases).
 
+## 0.5.0 - 2026-08-21
+
+This release gives `VectorStore` clear ownership of its configuration and row
+storage, makes repeated additions scale without recopying the complete store on
+every call, and defines deterministic ordering for equal search values. It also
+finishes the persistence transition announced in 0.4: the explicit
+create/open/save/reload lifecycle is now the only persistence API.
+
+### API at a glance
+
+The core workflow remains small:
+
+```python
+store = VectorStore(dimensions=1536, normalize=True)
+store.add(vectors, metadata)
+
+hits = store.cosine_search(query, top_k=10)
+row = store.get(0)
+
+store.save("vectors.npz")
+store.save()
+
+loaded = VectorStore.open("vectors.npz")
+loaded.reload()
+```
+
+`VectorStore` and `VectorHit` remain the only public classes. Version 0.5 does
+not add a document wrapper, builder, snapshot object, metadata query language,
+or another persistence abstraction.
+
+### Store-owned configuration and rows
+
+- Make `dimensions`, `normalize`, and `file_path` read-only properties. The
+  constructor owns configuration, while `open(path)` and a successful
+  `save(path)` own archive binding changes.
+- Return zero-copy, non-writeable active-row views from `vectors` and
+  `metadata`. Direct item assignment and ordinary attempts to enable writes are
+  rejected.
+- Keep inspection views moment-in-time. Code holding a view across `add()`,
+  `clear()`, or `reload()` must request a new one to inspect current rows.
+- Return an independent `float32` vector copy from `get(index)`, so changing a
+  retrieved vector cannot change normalized storage or a later search.
+- Preserve opaque metadata payloads by reference. The read-only metadata view
+  protects row alignment, not the contents of a caller-owned dict, list,
+  dataclass, or other application object.
+
+The views prevent accidental mutation through the supported API; they are not
+tamper-proof snapshots. Deliberately reaching backing storage through `.base`,
+private attributes, `ctypes`, or similar escape hatches remains unsupported.
+Call `.copy()` when code needs an independently mutable array.
+
+### Amortized repeated additions
+
+- Replace whole-store concatenation on every noninitial `add()` with private
+  contiguous vector and metadata capacity plus an active row count.
+- Reuse spare rows when a new batch fits. When it does not, grow vector and
+  metadata storage together and copy active rows once.
+- Keep spare capacity out of `len()`, inspection, search, `within_rows`,
+  retrieval, and saved archives.
+- Make `clear()` return the store to empty arrays and drop the store's retained
+  capacity. A caller-held older NumPy view may still keep its previous buffer
+  alive until that view is released.
+
+The `add(vectors, metadata)` signature, insertion order, validation,
+normalization, and opaque metadata behavior do not change. Passing a batch is
+still useful when the application already has one, but repeated small
+additions no longer move every earlier row on each call.
+
+### Deterministic search ties
+
+- Continue ordering cosine and dot-product results from larger values to
+  smaller values and Euclidean results from smaller distances to larger ones.
+- Break exact computed-value ties by ascending original store row index.
+- Apply the row-index tie break when choosing which rows cross the `top_k`
+  boundary, not only when ordering an already selected subset.
+- Use original store indexes for filtered searches, so shuffling the same
+  `within_rows` values does not change tied results.
+- Preserve partial top-k selection rather than replacing it with a full-store
+  sort.
+
+Only exactly equal computed values use the row-index tie break. Close but
+unequal values remain ordered by their metric value.
+
+### Final persistence lifecycle
+
+The 0.4 compatibility window is now closed:
+
+- Remove constructor `file_path=`. Create an in-memory store, then call
+  `save(path)` to write and bind it.
+- Remove instance `load()`. Use `VectorStore.open(path)` to construct a store
+  from an archive and `reload()` to refresh a bound store.
+- Remove context-manager persistence. Call `save()` explicitly where the
+  application intends to persist state.
+- Remove the reader for unversioned archives containing only `vectors` and
+  `metadata`.
+
+Archive format version 1 is unchanged. Applications that already use the 0.4
+`open()`, `save(path)`, `save()`, and `reload()` lifecycle need no persistence
+changes. An older unversioned archive must be converted with 0.4 using its
+original dimensions and normalization mode, or recreated from source data,
+before upgrading. See the [persistence migration guide](MIGRATION.md) for the
+side-by-side replacements and conversion procedure.
+
+### Thread safety and persistence boundaries
+
+- Support concurrent search, `get()`, and inspection on one instance only
+  while its state and shared metadata payloads remain unchanged.
+- Require application-level synchronization for every access when any thread
+  may call `add()`, `clear()`, `reload()`, or `save()`, or mutate shared
+  metadata.
+- Keep atomic archive replacement as a destination-visibility guarantee, not a
+  store snapshot, file lock, or multi-writer coordination system.
+
+Separate store instances writing the same path can still replace one another;
+applications with multiple writers must serialize them. Metadata persistence
+continues to use NumPy's pickle-backed object arrays, so archives remain trusted
+input and must not be opened from untrusted or unverifiable sources.
+
+### Runtime compatibility and upgrade notes
+
+- Continue supporting Python 3.11 through 3.14 and NumPy 1.23.2 or newer.
+- Continue exercising every supported Python version in CI, with a dedicated
+  minimum-NumPy job on Python 3.11.
+- Keep archive format version 1 readable and writable without a file migration.
+- Expect `AttributeError` from code that assigns public configuration or row
+  arrays, and different ordering from code that relied on incidental NumPy
+  partition order for exact ties.
+- Expect a migration before upgrading code that still uses constructor
+  `file_path=`, instance `load()`, context-manager persistence, or an
+  unversioned two-array archive.
+
 ## 0.4.0 - 2026-08-09
 
 This release makes persistence explicit, self-describing, and safer to update.
