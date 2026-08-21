@@ -326,20 +326,6 @@ class TestVectorStore:
 
         assert store.cosine_search([1.0, 0.0, 0.0], within_rows=[]) == []
 
-    def test_cosine_search_rejects_invalid_within_rows(self):
-        """Test within_rows validates shape, dtype, and bounds."""
-        store = VectorStore[dict[str, str]](dimensions=3)
-        store.add([[1.0, 0.0, 0.0]], [{"id": "x"}])
-
-        with pytest.raises(ValueError, match="1D"):
-            store.cosine_search([1.0, 0.0, 0.0], within_rows=[[0]])
-
-        with pytest.raises(ValueError, match="integer"):
-            store.cosine_search([1.0, 0.0, 0.0], within_rows=[0.0])
-
-        with pytest.raises(IndexError, match="outside"):
-            store.cosine_search([1.0, 0.0, 0.0], within_rows=[1])
-
     def test_cosine_search_rejects_wrong_query_dimensions(self):
         """Test cosine_search rejects wrong query dimensions."""
         store = VectorStore(dimensions=3)
@@ -669,6 +655,47 @@ class TestVectorStore:
             [1.0, 0.0], top_k=np.int64(1), min_value=np.float32(0.5)
         )
         assert [hit.index for hit in results] == [0]
+
+    @pytest.mark.parametrize(
+        "search_name", ["cosine_search", "dot_search", "euclidean_search"]
+    )
+    @pytest.mark.parametrize(
+        ("within_rows", "exception", "message"),
+        [
+            ([[0]], ValueError, "1D"),
+            ([[0], [0, 1]], ValueError, "1D"),
+            ([0.0], TypeError, "integer"),
+            ([True], TypeError, "integer"),
+            ([np.bool_(True)], TypeError, "integer"),
+            ([0, 0], ValueError, "unique"),
+        ],
+    )
+    @pytest.mark.parametrize("populated", [False, True])
+    def test_metric_searches_reject_invalid_row_selectors_independent_of_state(
+        self, search_name, within_rows, exception, message, populated
+    ):
+        """Test malformed and duplicate row selectors never bypass validation."""
+        store = VectorStore(dimensions=2)
+        if populated:
+            store.add([[1.0, 0.0]], [{"id": "x"}])
+
+        with pytest.raises(exception, match=message):
+            getattr(store, search_name)([1.0, 0.0], within_rows=within_rows)
+
+    @pytest.mark.parametrize(
+        "search_name", ["cosine_search", "dot_search", "euclidean_search"]
+    )
+    @pytest.mark.parametrize("populated", [False, True])
+    def test_metric_searches_reject_out_of_bounds_rows_independent_of_state(
+        self, search_name, populated
+    ):
+        """Test row bounds are checked before an empty search can return."""
+        store = VectorStore(dimensions=2)
+        if populated:
+            store.add([[1.0, 0.0]], [{"id": "x"}])
+
+        with pytest.raises(IndexError, match="outside"):
+            getattr(store, search_name)([1.0, 0.0], within_rows=[len(store)])
 
     @pytest.mark.parametrize(
         "search_name", ["cosine_search", "dot_search", "euclidean_search"]
