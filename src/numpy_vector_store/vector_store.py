@@ -5,15 +5,15 @@ import os
 import stat
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass
-from numbers import Real
 from pathlib import Path
-from typing import Any, Generic, SupportsIndex, TypeVar
+from typing import Any, Generic, SupportsIndex, TypeAlias, TypeVar
 from uuid import uuid4
 
 import numpy as np
 import numpy.typing as npt
 
 TMetadata = TypeVar("TMetadata")
+_RealScalar: TypeAlias = int | float | np.integer[Any] | np.floating[Any]
 
 _ARCHIVE_FORMAT_VERSION = 1
 _ARCHIVE_FIELDS = frozenset(
@@ -172,7 +172,7 @@ class VectorStore(Generic[TMetadata]):
         query: npt.ArrayLike,
         *,
         top_k: SupportsIndex = 10,
-        min_value: float | None = None,
+        min_value: _RealScalar | None = None,
         within_rows: Sequence[int] | npt.NDArray[np.integer[Any]] | None = None,
     ) -> list[VectorHit[TMetadata]]:
         """
@@ -199,7 +199,7 @@ class VectorStore(Generic[TMetadata]):
         query: npt.ArrayLike,
         *,
         top_k: SupportsIndex = 10,
-        min_value: float | None = None,
+        min_value: _RealScalar | None = None,
         within_rows: Sequence[int] | npt.NDArray[np.integer[Any]] | None = None,
     ) -> list[VectorHit[TMetadata]]:
         """
@@ -223,7 +223,7 @@ class VectorStore(Generic[TMetadata]):
         query: npt.ArrayLike,
         *,
         top_k: SupportsIndex = 10,
-        max_value: float | None = None,
+        max_value: _RealScalar | None = None,
         within_rows: Sequence[int] | npt.NDArray[np.integer[Any]] | None = None,
     ) -> list[VectorHit[TMetadata]]:
         """
@@ -468,12 +468,14 @@ class VectorStore(Generic[TMetadata]):
         return query_vector
 
     def _validate_search_threshold(
-        self, value: float | None, *, name: str
+        self, value: _RealScalar | None, *, name: str
     ) -> float | None:
         if value is None:
             return None
 
-        if isinstance(value, (bool, np.bool_)) or not isinstance(value, Real):
+        if isinstance(value, (bool, np.bool_)) or not isinstance(
+            value, (int, float, np.integer, np.floating)
+        ):
             raise TypeError(f"{name} must be a real number")
         value = float(value)
         if not np.isfinite(value):
@@ -518,8 +520,8 @@ class VectorStore(Generic[TMetadata]):
             npt.NDArray[np.float32] | npt.NDArray[np.float64],
         ],
         descending: bool,
-        min_value: float | None,
-        max_value: float | None,
+        min_value: _RealScalar | None,
+        max_value: _RealScalar | None,
     ) -> list[VectorHit[TMetadata]]:
         query_vector = self._validate_query(query)
         top_k = self._validate_integer(top_k, name="top_k")
