@@ -40,6 +40,8 @@ The persistence changes from 0.4 to 0.5 are:
 | `vectors`, `metadata` | Writable owning arrays | Read-only inspection views |
 | Vector returned by `get()` | View into live storage | Independent `float32` copy |
 | Repeated `add()` calls | Recopy all existing rows | Reuse private spare capacity |
+| Equal search values | Unspecified order | Lower original store row index first |
+| Thread safety | Not formally defined | Concurrent reads only while state is unchanged |
 
 ## Store-owned state
 
@@ -95,6 +97,36 @@ rows. `clear()` discards reserved storage as well as active rows, so it does not
 retain metadata payloads through unused capacity. A caller-held inspection view
 can still keep its previous NumPy buffer and payload references alive until the
 view itself is released.
+
+## Search result ordering
+
+Version 0.5 makes exact metric ties deterministic. Cosine and dot-product
+searches still rank larger values first, and Euclidean search still ranks
+smaller distances first. When computed values are equal, the lower original
+store row index comes first.
+
+This tie break also decides which rows are returned when equal values cross
+the `top_k` boundary. A shuffled `within_rows` input does not change the result:
+the original store indexes, rather than positions in the filtered input, break
+the tie. No call-site change is required, but code that depended on an
+incidental NumPy partition order should update its expectations.
+
+## Thread safety
+
+Version 0.5 defines the existing synchronization boundary without adding
+internal locks. Search, `get()`, and inspection may run concurrently on one
+instance only while store state and shared metadata payloads remain unchanged.
+
+Applications must externally synchronize all access to an instance whenever
+any thread may call `add()`, `clear()`, `reload()`, or `save()`, or mutate a
+metadata payload shared with the store. Saves must not overlap in-memory
+mutation because archive replacement protects the destination path, not the
+consistency of vectors and metadata read from a changing instance.
+
+Atomic replacement also does not coordinate separate store instances writing
+the same path. Applications with multiple writers must serialize them; without
+that coordination, each complete save may replace another and the last
+successful replacement wins.
 
 ## Creating and saving a new store
 

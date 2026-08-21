@@ -565,6 +565,7 @@ class VectorStore(Generic[TMetadata]):
         result_count: int,
         descending: bool,
     ) -> npt.NDArray[np.intp]:
+        """Select result positions by metric value, then original store index."""
         if result_count < len(values):
             partition_index = (
                 len(values) - result_count if descending else result_count - 1

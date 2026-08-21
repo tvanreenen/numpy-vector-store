@@ -352,7 +352,7 @@ fits a library whose primary operation is exact NumPy search.
 
 ### Deterministic equal-value ordering
 
-Version 0.5 will define one ordering rule for exact metric ties:
+Version 0.5 defines one ordering rule for exact metric ties:
 
 - Cosine and dot searches order larger values first.
 - Euclidean search orders smaller values first.
@@ -367,7 +367,7 @@ ranked.
 
 ### Thread-safety boundary
 
-`VectorStore` will not add internal locking in 0.5. Multiple threads may use
+`VectorStore` does not add internal locking in 0.5. Multiple threads may use
 search, `get()`, and the read-only inspection properties on the same instance
 while its state and metadata payloads remain unchanged.
 
