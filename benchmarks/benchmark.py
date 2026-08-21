@@ -210,7 +210,7 @@ def _prepared_inputs(
 
 
 def _array_digest(array: np.ndarray) -> str:
-    return hashlib.sha256(memoryview(array).cast("B")).hexdigest()
+    return hashlib.sha256(array.data).hexdigest()
 
 
 def _run_ingest(arguments: argparse.Namespace) -> dict[str, Any]:
