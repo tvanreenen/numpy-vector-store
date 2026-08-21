@@ -50,6 +50,21 @@ class TestVectorStore:
         with pytest.raises(ValueError, match="dimensions"):
             VectorStore(dimensions=0)
 
+    @pytest.mark.parametrize(
+        ("name", "value"),
+        [
+            ("dimensions", 3),
+            ("normalize", False),
+            ("file_path", Path("other.npz")),
+        ],
+    )
+    def test_configuration_properties_are_read_only(self, name, value):
+        """Test configuration and archive binding cannot be assigned directly."""
+        store = VectorStore(dimensions=2)
+
+        with pytest.raises(AttributeError, match=name):
+            setattr(store, name, value)
+
     def test_removed_persistence_entry_points_are_not_supported(self, tmp_path):
         """Test 0.4 constructor binding and instance loading are gone."""
         with pytest.raises(TypeError, match="file_path"):
