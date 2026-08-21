@@ -35,8 +35,8 @@ the median duration of seven measured 20-query trials by 20, after two discarded
 warmup trials. The vector matrix size excludes metadata, temporary search
 arrays, and Python process overhead.
 
-The measurements were taken from commit `469e1ce` on Apple M2 hardware with
-macOS 26.6.1, CPython 3.13.5, NumPy 2.3.3, and Accelerate BLAS. Hardware,
+The measurements were taken from commit `469e1ce` on a 24 GB Apple M4 Mac mini
+with macOS 26.6.1, CPython 3.13.5, NumPy 2.3.3, and Accelerate BLAS. Hardware,
 operating system activity, Python and NumPy versions, BLAS implementation, and
 thread settings can all change the result.
 
