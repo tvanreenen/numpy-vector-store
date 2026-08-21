@@ -36,11 +36,11 @@ compatibility contract and are exercised in CI. The project generally:
 - Drops a Python version only in a minor release and calls out the change in
   release notes.
 
-The 0.3 series supports Python 3.10 through 3.14. Versions 0.4 and 0.5 support
-Python 3.11 through 3.14, using the 0.4 minor-release boundary to remove Python
-3.10 ahead of its upstream end-of-life in October 2026. NumPy 1.23.2 is the
-minimum for 0.4 and later because it is the earliest NumPy release that supports
-Python 3.11.
+The 0.3 series supports Python 3.10 through 3.14. Versions 0.4 through 0.6
+support Python 3.11 through 3.14, using the 0.4 minor-release boundary to remove
+Python 3.10 ahead of its upstream end-of-life in October 2026. NumPy 1.23.2 is
+the minimum for 0.4 and later because it is the earliest NumPy release that
+supports Python 3.11.
 
 Supported NumPy versions are also part of the runtime contract. The declared
 minimum should be installable on the oldest supported Python version and should
@@ -396,9 +396,9 @@ in the 0.6 stabilization milestone.
 
 ## 0.6.0: Predictable input contracts and regression guarantees
 
-Status: in progress
+Status: complete
 
-Version 0.6 will make the existing API's accepted inputs, failures, performance
+Version 0.6 makes the existing API's accepted inputs, failures, performance
 expectations, and versioned-archive compatibility explicit before 1.0. Valid
 documented 0.5 calls remain supported. Inputs that were accepted only through
 Python truth-value coercion, NumPy indexing side effects, or row-count shortcuts

@@ -26,9 +26,9 @@ matrix size:
 
 | Rows | 384 dimensions | 1,536 dimensions | 3,072 dimensions |
 |---:|---:|---:|---:|
-| 1,000 | 0.032 ms · 1.5 MB | 0.047 ms · 6.1 MB | 0.083 ms · 12.3 MB |
-| 10,000 | 0.261 ms · 15.4 MB | 0.968 ms · 61.4 MB | 2.022 ms · 122.9 MB |
-| 100,000 | 2.908 ms · 153.6 MB | 9.724 ms · 614.4 MB | 19.941 ms · 1.23 GB |
+| 1,000 | 0.032 ms · 1.5 MB | 0.049 ms · 6.1 MB | 0.088 ms · 12.3 MB |
+| 10,000 | 0.286 ms · 15.4 MB | 1.065 ms · 61.4 MB | 2.122 ms · 122.9 MB |
+| 100,000 | 2.983 ms · 153.6 MB | 9.877 ms · 614.4 MB | 20.509 ms · 1.23 GB |
 
 These benchmarks intentionally stop at 100,000 rows. NumPy Vector Store is
 designed for small-to-medium, in-process exact search; 100,000 rows is an upper
@@ -42,7 +42,7 @@ the median duration of seven measured 20-query trials by 20, after two discarded
 warmup trials. The vector matrix size excludes metadata, temporary search
 arrays, and Python process overhead.
 
-The measurements were taken from commit `801de9a` on a 24 GB Apple M4 Mac mini
+The measurements were taken from commit `4b23810` on a 24 GB Apple M4 Mac mini
 with macOS 26.6.1, CPython 3.13.5, NumPy 2.3.3, and Accelerate BLAS. Hardware,
 operating system activity, Python and NumPy versions, BLAS implementation, and
 thread settings can all change the result.
@@ -61,8 +61,8 @@ uv run python benchmarks/benchmark.py ingest \
 ```
 
 For the same 10,000-by-384 prepared input, repeated single-row ingestion had a
-median of 77.3 ms, or about 129,000 rows per second. Supplying 1,000 rows per
-`add()` call had a median of 6.28 ms, or about 1.59 million rows per second.
+median of 78.6 ms, or about 127,000 rows per second. Supplying 1,000 rows per
+`add()` call had a median of 6.63 ms, or about 1.51 million rows per second.
 Both measurements include construction of a fresh normalized store and every
 `add()` call, but exclude input generation.
 
@@ -435,7 +435,7 @@ writers can still replace one another, and the library does not promise that a
 successful save has reached durable hardware storage across every operating
 system or power failure.
 
-Version 0.5 reads only self-describing format version 1 archives. Unversioned
+Version 0.6 reads only self-describing format version 1 archives. Unversioned
 archives containing only `vectors` and `metadata` cannot be opened because they
 do not record dimensions or normalization semantics. Recreate those archives
 from source data, or convert them with NumPy Vector Store 0.4 before upgrading.
@@ -455,10 +455,10 @@ the API stabilizes. Changes are documented in the [changelog](CHANGELOG.md) and
 GitHub release notes. Deprecated APIs will keep warning for at least one point
 release before removal.
 
-Version 0.5 supports Python 3.11 through 3.14 and NumPy 1.23.2 or newer. These
+Version 0.6 supports Python 3.11 through 3.14 and NumPy 1.23.2 or newer. These
 versions are listed in the package metadata and exercised in CI, including a
 dedicated check against the minimum NumPy version. Python 3.10 remains supported
-by the 0.3 release series but is not supported by 0.4 or 0.5.
+by the 0.3 release series but is not supported by 0.4 or later.
 
 The project generally retains stable CPython versions until their upstream
 end-of-life, adds new versions after its dependencies and CI support them, and
