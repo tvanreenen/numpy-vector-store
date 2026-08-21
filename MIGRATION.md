@@ -1,14 +1,41 @@
 # Persistence migration guide
 
-Version 0.4 introduces a persistence lifecycle that separates creating a new
-store, opening an existing archive, saving, and deliberately refreshing from
-disk. It also provides a one-release bridge for applications and archives using
-the earlier API.
+Version 0.5 completes the persistence lifecycle introduced in 0.4. Creating a
+store, opening an archive, saving, and refreshing from disk now have separate,
+explicit operations. Applications that adopted the recommended 0.4 API need no
+further persistence changes.
 
-The transition is intentionally short. Version 0.4 emits `FutureWarning` for
-constructor `file_path=`, instance `load()`, direct context-manager use, and
-unversioned archives. Version 0.5 removes those entry points and the
-unversioned archive reader.
+The 0.4 compatibility paths are no longer present: constructor `file_path=`,
+instance `load()`, context-manager persistence, and the unversioned archive
+reader have been removed.
+
+## API at a glance
+
+```python
+store = VectorStore(dimensions=1536, normalize=True)
+store.add(vectors, metadata)
+store.save("vectors.npz")
+
+store.save()  # Update the bound archive.
+
+loaded = VectorStore.open("vectors.npz")
+loaded.reload()  # Deliberately discard memory and reread the archive.
+```
+
+The persistence changes from 0.4 to 0.5 are:
+
+| Area | 0.4 | 0.5 |
+|---|---|---|
+| Create a store | `VectorStore(dimensions, normalize=...)` | Unchanged |
+| Constructor `file_path=` | Works with `FutureWarning` | Removed |
+| Open an archive | `VectorStore.open(path)` | Unchanged |
+| Save and bind | `save(path)` | Unchanged |
+| Save again | `save()` | Unchanged |
+| Refresh from disk | `reload()` | Unchanged |
+| Instance `load()` | Works with `FutureWarning` | Removed |
+| Context manager | Works with `FutureWarning` | Removed |
+| Unversioned archive | Temporary migration reader | Reader removed |
+| Format version 1 archive | Supported | Supported unchanged |
 
 ## Creating and saving a new store
 
@@ -90,9 +117,9 @@ store = VectorStore.open("vectors.npz")
 store.reload()
 ```
 
-Unlike transitional `load()`, `reload()` always attempts to read. It raises if
-the store is unbound, the file is missing, or the archive is invalid. A failed
-reload leaves the current in-memory vectors and metadata unchanged.
+`reload()` always attempts to read. It raises if the store is unbound, the file
+is missing, or the archive is invalid. A failed reload leaves the current
+in-memory vectors and metadata unchanged.
 
 ## Replacing context-manager persistence
 
@@ -115,9 +142,9 @@ Normal Python control flow already prevents the final line from running if
 `add()` raises. The persistence boundary is visible, and readers do not need to
 remember an implicit exit side effect.
 
-During 0.4, the deprecated context manager saves only after normal completion.
-It does not save while an exception is propagating and does not suppress the
-exception. There is no planned replacement autosave context manager.
+There is no replacement autosave context manager. An explicit `save()` keeps
+the persistence boundary visible and lets the application decide whether work
+completed successfully enough to persist.
 
 ## Migrating an archive created before 0.4
 
@@ -125,7 +152,8 @@ Older archives contain only `vectors` and `metadata`. They do not record their
 dimensions or whether vectors use normalized or raw semantics, so `open()`
 cannot construct a correct store from them.
 
-Use the 0.4 compatibility API once with the archive's original configuration:
+Before upgrading to 0.5, use the 0.4 compatibility API once with the archive's
+original configuration:
 
 ```python
 legacy = VectorStore(
@@ -137,17 +165,18 @@ legacy.load()
 legacy.save()
 ```
 
-This code emits transition warnings by design. The final `save()` rewrites the
-archive as format version 1 with `format_version`, `dimensions`, `normalize`,
-`vectors`, and `metadata`. It can then use the preferred API:
+This code emits transition warnings in 0.4 by design. The final `save()`
+rewrites the archive as format version 1 with `format_version`, `dimensions`,
+`normalize`, `vectors`, and `metadata`. It can then be opened by 0.5:
 
 ```python
 store = VectorStore.open("legacy-vectors.npz")
 ```
 
 Applications that can recreate archives from source vectors and metadata may
-choose to do that instead. The unversioned reader is removed in 0.5 rather than
-maintained as a long-term compatibility format.
+do that instead. NumPy Vector Store 0.5 cannot perform this conversion because
+the unversioned file does not contain enough information to reconstruct its
+configuration safely.
 
 ## Removal schedule
 
