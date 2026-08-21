@@ -875,7 +875,7 @@ class TestVectorStore:
         np.testing.assert_array_almost_equal(opened.get(0)[0], expected)
 
     def test_open_resolves_extensionless_path(self, tmp_path):
-        """Test open uses the same extension resolution as save and load."""
+        """Test open uses the same extension resolution as save."""
         extensionless_path = tmp_path / "vectors"
         expected_path = tmp_path / "vectors.npz"
         persisted = VectorStore(dimensions=2)
