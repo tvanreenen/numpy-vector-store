@@ -1,17 +1,19 @@
 from __future__ import annotations
 
+import operator
 import os
 import stat
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Generic, TypeVar
+from typing import Any, Generic, SupportsIndex, TypeAlias, TypeVar
 from uuid import uuid4
 
 import numpy as np
 import numpy.typing as npt
 
 TMetadata = TypeVar("TMetadata")
+_RealScalar: TypeAlias = int | float | np.integer[Any] | np.floating[Any]
 
 _ARCHIVE_FORMAT_VERSION = 1
 _ARCHIVE_FIELDS = frozenset(
@@ -47,9 +49,9 @@ class VectorStore(Generic[TMetadata]):
 
     def __init__(
         self,
-        dimensions: int,
+        dimensions: SupportsIndex,
         *,
-        normalize: bool = True,
+        normalize: bool | np.bool_ = True,
     ) -> None:
         """
         Initialize the vector store.
@@ -58,8 +60,10 @@ class VectorStore(Generic[TMetadata]):
             dimensions: The number of dimensions for vectors to be stored.
             normalize: Whether to store vectors normalized to unit length.
         """
+        dimensions = self._validate_integer(dimensions, name="dimensions")
         if dimensions <= 0:
             raise ValueError("dimensions must be greater than 0")
+        normalize = self._validate_boolean(normalize, name="normalize")
 
         self._dimensions = dimensions
         self._file_path: Path | None = None
@@ -167,8 +171,8 @@ class VectorStore(Generic[TMetadata]):
         self,
         query: npt.ArrayLike,
         *,
-        top_k: int = 10,
-        min_value: float | None = None,
+        top_k: SupportsIndex = 10,
+        min_value: _RealScalar | None = None,
         within_rows: Sequence[int] | npt.NDArray[np.integer[Any]] | None = None,
     ) -> list[VectorHit[TMetadata]]:
         """
@@ -194,8 +198,8 @@ class VectorStore(Generic[TMetadata]):
         self,
         query: npt.ArrayLike,
         *,
-        top_k: int = 10,
-        min_value: float | None = None,
+        top_k: SupportsIndex = 10,
+        min_value: _RealScalar | None = None,
         within_rows: Sequence[int] | npt.NDArray[np.integer[Any]] | None = None,
     ) -> list[VectorHit[TMetadata]]:
         """
@@ -218,8 +222,8 @@ class VectorStore(Generic[TMetadata]):
         self,
         query: npt.ArrayLike,
         *,
-        top_k: int = 10,
-        max_value: float | None = None,
+        top_k: SupportsIndex = 10,
+        max_value: _RealScalar | None = None,
         within_rows: Sequence[int] | npt.NDArray[np.integer[Any]] | None = None,
     ) -> list[VectorHit[TMetadata]]:
         """
@@ -291,8 +295,11 @@ class VectorStore(Generic[TMetadata]):
             np.subtract(vectors, query, out=differences, dtype=np.float64)
         return np.asarray(np.linalg.norm(differences, axis=1), dtype=np.float64)
 
-    def get(self, index: int) -> tuple[npt.NDArray[np.float32], TMetadata] | None:
+    def get(
+        self, index: SupportsIndex
+    ) -> tuple[npt.NDArray[np.float32], TMetadata] | None:
         """Get a stored vector and metadata payload by row index."""
+        index = self._validate_integer(index, name="index")
         if 0 <= index < self._row_count:
             return (self._vectors[index].copy(), self._metadata[index])
         return None
@@ -391,6 +398,21 @@ class VectorStore(Generic[TMetadata]):
             return Path(f"{path}.npz")
         return path
 
+    @staticmethod
+    def _validate_integer(value: SupportsIndex, *, name: str) -> int:
+        if isinstance(value, (bool, np.bool_)):
+            raise TypeError(f"{name} must be an integer")
+        try:
+            return operator.index(value)
+        except TypeError:
+            raise TypeError(f"{name} must be an integer") from None
+
+    @staticmethod
+    def _validate_boolean(value: bool | np.bool_, *, name: str) -> bool:
+        if not isinstance(value, (bool, np.bool_)):
+            raise TypeError(f"{name} must be a boolean")
+        return bool(value)
+
     def _to_float32_array(self, values: npt.ArrayLike) -> npt.NDArray[np.float32]:
         with np.errstate(over="ignore", invalid="ignore"):
             return np.asarray(values, dtype=np.float32)
@@ -446,12 +468,19 @@ class VectorStore(Generic[TMetadata]):
         return query_vector
 
     def _validate_search_threshold(
-        self, value: float | None, *, name: str
+        self, value: _RealScalar | None, *, name: str
     ) -> float | None:
         if value is None:
             return None
 
-        value = float(value)
+        if isinstance(value, (bool, np.bool_)) or not isinstance(
+            value, (int, float, np.integer, np.floating)
+        ):
+            raise TypeError(f"{name} must be a real number")
+        try:
+            value = float(value)
+        except OverflowError:
+            raise ValueError(f"{name} must be finite") from None
         if not np.isfinite(value):
             raise ValueError(f"{name} must be finite")
         return value
@@ -487,22 +516,23 @@ class VectorStore(Generic[TMetadata]):
         self,
         query: npt.ArrayLike,
         *,
-        top_k: int,
+        top_k: SupportsIndex,
         within_rows: Sequence[int] | npt.NDArray[np.integer[Any]] | None,
         values_fn: Callable[
             [npt.NDArray[np.float32], npt.NDArray[np.float32]],
             npt.NDArray[np.float32] | npt.NDArray[np.float64],
         ],
         descending: bool,
-        min_value: float | None,
-        max_value: float | None,
+        min_value: _RealScalar | None,
+        max_value: _RealScalar | None,
     ) -> list[VectorHit[TMetadata]]:
         query_vector = self._validate_query(query)
-        min_value = self._validate_search_threshold(min_value, name="min_value")
-        max_value = self._validate_search_threshold(max_value, name="max_value")
-
+        top_k = self._validate_integer(top_k, name="top_k")
         if top_k <= 0:
             raise ValueError("top_k must be greater than 0")
+
+        min_value = self._validate_search_threshold(min_value, name="min_value")
+        max_value = self._validate_search_threshold(max_value, name="max_value")
 
         if self._row_count == 0:
             return []

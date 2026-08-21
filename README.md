@@ -70,6 +70,26 @@ Each payload can be a dict, dataclass, tuple, list, string, integer row ID, or
 another Python object that fits your application. Tuple and list payloads remain
 single row values rather than being interpreted as additional array dimensions.
 
+## Scalar inputs and errors
+
+`dimensions`, `top_k`, and the index passed to `get()` use integer semantics.
+Python integers and NumPy integer scalars are accepted and converted to Python
+`int`; booleans are rejected rather than being treated as zero or one.
+`dimensions` and `top_k` must be greater than zero. A valid integer outside the
+stored row range still makes `get()` return `None`.
+
+`normalize` accepts Python and NumPy booleans and is stored as a Python `bool`.
+Search thresholds such as `min_value` and `max_value` accept finite Python
+integer or floating-point values and NumPy integer or floating scalars.
+Booleans, strings, complex numbers, and arrays are not threshold scalars and are
+rejected.
+
+For these scalar inputs, an inappropriate type raises `TypeError` and a
+supported type with an invalid value raises `ValueError`. Row selectors outside
+the store raise `IndexError`, and filesystem operations continue to raise the
+relevant `OSError` subclass. Error messages explain the failed argument, but
+their exact wording is not a compatibility guarantee.
+
 ## State ownership
 
 The store owns its configuration and row structure. `dimensions`, `normalize`,

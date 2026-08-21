@@ -36,10 +36,11 @@ compatibility contract and are exercised in CI. The project generally:
 - Drops a Python version only in a minor release and calls out the change in
   release notes.
 
-The 0.3 series supports Python 3.10 through 3.14. Version 0.4 supports Python
-3.11 through 3.14, using the minor-release boundary to remove Python 3.10 ahead
-of its upstream end-of-life in October 2026. NumPy 1.23.2 is the minimum for
-0.4 because it is the earliest NumPy release that supports Python 3.11.
+The 0.3 series supports Python 3.10 through 3.14. Versions 0.4 and 0.5 support
+Python 3.11 through 3.14, using the 0.4 minor-release boundary to remove Python
+3.10 ahead of its upstream end-of-life in October 2026. NumPy 1.23.2 is the
+minimum for 0.4 and later because it is the earliest NumPy release that supports
+Python 3.11.
 
 Supported NumPy versions are also part of the runtime contract. The declared
 minimum should be installable on the oldest supported Python version and should
@@ -393,17 +394,71 @@ State encapsulation and spare capacity do not change serialized data, so format
 version 1 remains sufficient. Broader validation and exception consistency stay
 in the 0.6 stabilization milestone.
 
-## 0.6.0: API stabilization
+## 0.6.0: Predictable input contracts and regression guarantees
 
-This release is intended to consolidate the earlier changes rather than add a
-new feature family.
+Status: in progress
 
-Planned direction:
+Version 0.6 will make the existing API's accepted inputs, failures, performance
+expectations, and versioned-archive compatibility explicit before 1.0. Valid
+documented 0.5 calls remain supported. Inputs that were accepted only through
+Python truth-value coercion, NumPy indexing side effects, or row-count shortcuts
+may be rejected at this minor-release boundary.
 
-- Make validation and exception behavior consistent across methods.
-- Add performance regression coverage for representative store sizes.
-- Exercise persistence upgrades and backwards compatibility.
-- Resolve known high- and medium-priority defects.
+### Scalar configuration, counts, and indexes
+
+- Accept Python and NumPy integer scalars for `dimensions`, `top_k`, and
+  `get(index)`, then convert them to Python `int`.
+- Reject Python and NumPy booleans where integer semantics are required. This
+  prevents `top_k=True` from meaning one and prevents `get(True)` from invoking
+  NumPy boolean indexing instead of retrieving one row.
+- Require positive dimensions and result counts while keeping `get()`'s
+  established `None` result for a valid integer outside the stored row range.
+- Accept Python and NumPy booleans for `normalize`, then keep a canonical Python
+  `bool` so configuration cannot change meaning across persistence.
+- Accept finite Python and NumPy integer or floating scalar search thresholds,
+  excluding booleans, strings, complex numbers, and arrays.
+
+Wrong argument types raise `TypeError`, supported types with invalid values
+raise `ValueError`, and row selectors outside the store raise `IndexError`.
+Exact error wording is explanatory rather than a compatibility contract.
+
+### State-independent search preconditions
+
+- Validate `within_rows` shape, integer values, uniqueness, and bounds before an
+  empty store can return no hits.
+- Apply zero-query rules consistently: cosine always requires a non-zero query;
+  normalized dot and Euclidean searches also normalize their query; raw dot and
+  Euclidean searches continue accepting a zero query.
+- Reject duplicate filtered row indexes rather than returning the same stored
+  row more than once.
+
+### Versioned persistence compatibility
+
+- Distinguish an omitted path from an explicitly empty or incorrectly typed
+  path while preserving normal filesystem exception types.
+- Keep current releases able to open format-version-1 archives produced by 0.4
+  at the oldest supported Python and NumPy boundary.
+- Preserve schema and deserialization failure context without wrapping every
+  NumPy, pickle, or application exception in a package-specific error.
+
+This compatibility promise applies to self-describing format-version-1
+archives. It does not restore the unversioned two-array reader, removed 0.4
+entry points, or a guarantee that an older package can open files written by an
+arbitrary newer format.
+
+### Reproducible performance evidence
+
+- Add deterministic ingestion and search benchmark commands that record their
+  environment, input sizes, warmup, repetitions, and summary statistic.
+- Keep structural regression tests for capacity growth, partial top-k
+  selection, and avoidable full-matrix copies.
+- Keep wall-clock thresholds out of shared CI, where runner variance would make
+  failures noisy rather than diagnostic.
+
+Version 0.6 does not add update, delete, builder, streaming, async, locking, or
+metadata-query APIs. It does not introduce a validation dependency, public
+exception hierarchy, archive format version 2, or deep-copy policy for opaque
+metadata.
 
 ## 1.0.0: Stable contracts
 
