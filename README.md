@@ -84,6 +84,12 @@ integer or floating-point values and NumPy integer or floating scalars.
 Booleans, strings, complex numbers, and arrays are not threshold scalars and are
 rejected.
 
+`within_rows` must be a one-dimensional sequence of unique integer row indexes.
+Python and NumPy integers are accepted; booleans and non-integer values are not.
+Malformed shapes and duplicate indexes raise `ValueError`, while an index
+outside the current store raises `IndexError`. These checks still run when the
+store is empty.
+
 For these scalar inputs, an inappropriate type raises `TypeError` and a
 supported type with an invalid value raises `ValueError`. Row selectors outside
 the store raise `IndexError`, and filesystem operations continue to raise the
@@ -166,6 +172,11 @@ search. Because cosine similarity is undefined for zero vectors,
 `cosine_search` raises an error when its selected rows include one; use
 `within_rows` to exclude zero rows when needed.
 
+Cosine search also requires a non-zero query. Dot-product and Euclidean searches
+require one when `normalize=True`, because they normalize the query before
+comparison. With `normalize=False`, both methods accept a zero query. These
+rules apply even when the store or `within_rows` selection is empty.
+
 ### Numerical inputs
 
 Stored vectors use `float32` to keep the store compact. Vectors and queries must
@@ -239,6 +250,10 @@ rows = [
 
 hits = store.cosine_search(query, top_k=10, within_rows=rows)
 ```
+
+Each stored row may appear at most once in `within_rows`; duplicate indexes are
+rejected rather than producing duplicate hits. An empty sequence returns no
+hits, but it does not bypass validation of the query or other search arguments.
 
 Searches without `within_rows` compute directly against the stored vector matrix
 and do not make a full copy of it. A filtered search gathers the selected rows

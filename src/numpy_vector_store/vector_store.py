@@ -173,7 +173,9 @@ class VectorStore(Generic[TMetadata]):
         *,
         top_k: SupportsIndex = 10,
         min_value: _RealScalar | None = None,
-        within_rows: Sequence[int] | npt.NDArray[np.integer[Any]] | None = None,
+        within_rows: Sequence[SupportsIndex]
+        | npt.NDArray[np.integer[Any]]
+        | None = None,
     ) -> list[VectorHit[TMetadata]]:
         """
         Return the most similar rows using cosine similarity.
@@ -189,6 +191,7 @@ class VectorStore(Generic[TMetadata]):
             top_k=top_k,
             within_rows=within_rows,
             values_fn=self._cosine_values,
+            normalize_query=True,
             descending=True,
             min_value=min_value,
             max_value=None,
@@ -200,7 +203,9 @@ class VectorStore(Generic[TMetadata]):
         *,
         top_k: SupportsIndex = 10,
         min_value: _RealScalar | None = None,
-        within_rows: Sequence[int] | npt.NDArray[np.integer[Any]] | None = None,
+        within_rows: Sequence[SupportsIndex]
+        | npt.NDArray[np.integer[Any]]
+        | None = None,
     ) -> list[VectorHit[TMetadata]]:
         """
         Return rows ranked by dot product.
@@ -213,6 +218,7 @@ class VectorStore(Generic[TMetadata]):
             top_k=top_k,
             within_rows=within_rows,
             values_fn=self._dot_values,
+            normalize_query=self._normalize,
             descending=True,
             min_value=min_value,
             max_value=None,
@@ -224,7 +230,9 @@ class VectorStore(Generic[TMetadata]):
         *,
         top_k: SupportsIndex = 10,
         max_value: _RealScalar | None = None,
-        within_rows: Sequence[int] | npt.NDArray[np.integer[Any]] | None = None,
+        within_rows: Sequence[SupportsIndex]
+        | npt.NDArray[np.integer[Any]]
+        | None = None,
     ) -> list[VectorHit[TMetadata]]:
         """
         Return rows ranked by Euclidean distance.
@@ -238,6 +246,7 @@ class VectorStore(Generic[TMetadata]):
             top_k=top_k,
             within_rows=within_rows,
             values_fn=self._euclidean_values,
+            normalize_query=self._normalize,
             descending=False,
             min_value=None,
             max_value=max_value,
@@ -247,10 +256,8 @@ class VectorStore(Generic[TMetadata]):
         self, query: npt.NDArray[np.float32], vectors: npt.NDArray[np.float32]
     ) -> npt.NDArray[np.float32]:
         """Compute cosine similarity values."""
-        query_norm = self._normalize_query(query)
-
         if self._normalize:
-            values = np.dot(vectors, query_norm)
+            values = np.dot(vectors, query)
         else:
             vector_norms = self._row_norms(vectors)
             if np.any(vector_norms == 0):
@@ -259,7 +266,7 @@ class VectorStore(Generic[TMetadata]):
                 np.einsum(
                     "ij,j->i",
                     vectors,
-                    query_norm,
+                    query,
                     dtype=np.float64,
                 )
                 / vector_norms
@@ -272,7 +279,6 @@ class VectorStore(Generic[TMetadata]):
     ) -> npt.NDArray[np.float64]:
         """Compute dot product values."""
         if self._normalize:
-            query = self._normalize_query(query)
             values = np.dot(vectors, query)
         else:
             values = np.einsum(
@@ -288,7 +294,6 @@ class VectorStore(Generic[TMetadata]):
     ) -> npt.NDArray[np.float64]:
         """Compute Euclidean distance values."""
         if self._normalize:
-            query = self._normalize_query(query)
             differences = vectors - query
         else:
             differences = np.empty(vectors.shape, dtype=np.float64)
@@ -497,31 +502,62 @@ class VectorStore(Generic[TMetadata]):
         )
 
     def _normalize_within_rows(
-        self, within_rows: Sequence[int] | npt.NDArray[np.integer[Any]]
+        self,
+        within_rows: Sequence[SupportsIndex] | npt.NDArray[np.integer[Any]],
     ) -> npt.NDArray[np.intp]:
-        rows = np.asarray(within_rows)
+        if isinstance(within_rows, np.ndarray):
+            rows = np.asarray(within_rows)
+        else:
+            has_nested_rows = any(
+                isinstance(row, (list, tuple, np.ndarray)) for row in within_rows
+            )
+            rows = np.asarray(
+                within_rows,
+                dtype=object if has_nested_rows else None,
+            )
+
         if rows.ndim != 1:
             raise ValueError("within_rows must be a 1D sequence of row indexes")
         if len(rows) == 0:
-            return np.array([], dtype=np.intp)
-        if not np.issubdtype(rows.dtype, np.integer):
-            raise ValueError("within_rows must contain integer row indexes")
+            return np.empty(0, dtype=np.intp)
 
-        rows = rows.astype(np.intp, copy=False)
-        if np.any(rows < 0) or np.any(rows >= self._row_count):
+        if np.issubdtype(rows.dtype, np.integer):
+            if len(np.unique(rows)) != len(rows):
+                raise ValueError("within_rows must contain unique row indexes")
+            if np.any(rows < 0) or np.any(rows >= self._row_count):
+                raise IndexError("within_rows contains row indexes outside the store")
+            return rows.astype(np.intp, copy=False)
+
+        if rows.dtype != np.dtype(object):
+            raise TypeError("within_rows must contain integer row indexes")
+        if any(np.asarray(row).ndim != 0 for row in rows):
+            raise ValueError("within_rows must be a 1D sequence of row indexes")
+
+        try:
+            normalized_rows = [
+                self._validate_integer(row, name="within_rows row index")
+                for row in rows
+            ]
+        except TypeError:
+            raise TypeError("within_rows must contain integer row indexes") from None
+
+        if len(set(normalized_rows)) != len(normalized_rows):
+            raise ValueError("within_rows must contain unique row indexes")
+        if any(row < 0 or row >= self._row_count for row in normalized_rows):
             raise IndexError("within_rows contains row indexes outside the store")
-        return rows
+        return np.asarray(normalized_rows, dtype=np.intp)
 
     def _metric_search(
         self,
         query: npt.ArrayLike,
         *,
         top_k: SupportsIndex,
-        within_rows: Sequence[int] | npt.NDArray[np.integer[Any]] | None,
+        within_rows: Sequence[SupportsIndex] | npt.NDArray[np.integer[Any]] | None,
         values_fn: Callable[
             [npt.NDArray[np.float32], npt.NDArray[np.float32]],
             npt.NDArray[np.float32] | npt.NDArray[np.float64],
         ],
+        normalize_query: bool,
         descending: bool,
         min_value: _RealScalar | None,
         max_value: _RealScalar | None,
@@ -534,13 +570,18 @@ class VectorStore(Generic[TMetadata]):
         min_value = self._validate_search_threshold(min_value, name="min_value")
         max_value = self._validate_search_threshold(max_value, name="max_value")
 
+        row_indices = None
+        if within_rows is not None:
+            row_indices = self._normalize_within_rows(within_rows)
+
+        if normalize_query:
+            query_vector = self._normalize_query(query_vector)
+
         if self._row_count == 0:
             return []
 
-        row_indices = None
         selected_vectors = self._vectors[: self._row_count]
-        if within_rows is not None:
-            row_indices = self._normalize_within_rows(within_rows)
+        if row_indices is not None:
             if len(row_indices) == 0:
                 return []
             selected_vectors = self._vectors[row_indices]
