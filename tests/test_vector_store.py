@@ -716,7 +716,7 @@ class TestVectorStore:
             ("euclidean_search", "max_value"),
         ],
     )
-    @pytest.mark.parametrize("non_finite", [np.nan, np.inf, -np.inf])
+    @pytest.mark.parametrize("non_finite", [np.nan, np.inf, -np.inf, 10**400])
     def test_metric_searches_reject_non_finite_thresholds(
         self, search_name, threshold_name, non_finite
     ):

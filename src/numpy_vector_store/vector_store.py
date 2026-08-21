@@ -477,7 +477,10 @@ class VectorStore(Generic[TMetadata]):
             value, (int, float, np.integer, np.floating)
         ):
             raise TypeError(f"{name} must be a real number")
-        value = float(value)
+        try:
+            value = float(value)
+        except OverflowError:
+            raise ValueError(f"{name} must be finite") from None
         if not np.isfinite(value):
             raise ValueError(f"{name} must be finite")
         return value
