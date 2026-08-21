@@ -64,10 +64,11 @@ class VectorStore(Generic[TMetadata]):
         self._dimensions = dimensions
         self._file_path: Path | None = None
         self._normalize = normalize
-        self.vectors: npt.NDArray[np.float32] = np.empty(
+        self._vectors: npt.NDArray[np.float32] = np.empty(
             (0, dimensions), dtype=np.float32
         )
-        self.metadata: npt.NDArray[Any] = np.array([], dtype=object)
+        self._metadata: npt.NDArray[Any] = np.array([], dtype=object)
+        self._lock_row_storage()
 
     @property
     def dimensions(self) -> int:
@@ -83,6 +84,20 @@ class VectorStore(Generic[TMetadata]):
     def file_path(self) -> Path | None:
         """Return the currently bound archive path, if any."""
         return self._file_path
+
+    @property
+    def vectors(self) -> npt.NDArray[np.float32]:
+        """Return a read-only, moment-in-time view of stored vectors."""
+        view = self._vectors.view()
+        view.flags.writeable = False
+        return view
+
+    @property
+    def metadata(self) -> npt.NDArray[Any]:
+        """Return a read-only, moment-in-time view of metadata rows."""
+        view = self._metadata.view()
+        view.flags.writeable = False
+        return view
 
     @classmethod
     def open(cls, path: str | Path) -> VectorStore[TMetadata]:
@@ -128,14 +143,15 @@ class VectorStore(Generic[TMetadata]):
             non_finite_error_message="Cannot add vectors containing non-finite values",
         )
 
-        if len(self.vectors) == 0:
-            self.vectors = vectors_to_store
+        if len(self._vectors) == 0:
+            combined_vectors = vectors_to_store
         else:
-            self.vectors = np.vstack([self.vectors, vectors_to_store]).astype(
+            combined_vectors = np.vstack([self._vectors, vectors_to_store]).astype(
                 np.float32, copy=False
             )
 
-        self.metadata = np.append(self.metadata, metadata_array)
+        combined_metadata = np.append(self._metadata, metadata_array)
+        self._replace_rows(combined_vectors, combined_metadata)
 
     def reload(self) -> None:
         """Refresh this store from its bound archive path."""
@@ -284,18 +300,33 @@ class VectorStore(Generic[TMetadata]):
 
     def get(self, index: int) -> tuple[npt.NDArray[np.float32], TMetadata] | None:
         """Get a stored vector and metadata payload by row index."""
-        if 0 <= index < len(self.vectors):
-            return (self.vectors[index], self.metadata[index])
+        if 0 <= index < len(self._vectors):
+            return (self._vectors[index].copy(), self._metadata[index])
         return None
 
     def clear(self) -> None:
         """Clear all vectors and metadata from the store."""
-        self.vectors = np.empty((0, self._dimensions), dtype=np.float32)
-        self.metadata = np.array([], dtype=object)
+        self._replace_rows(
+            np.empty((0, self._dimensions), dtype=np.float32),
+            np.array([], dtype=object),
+        )
 
     def __len__(self) -> int:
         """Return the number of stored vector rows."""
-        return len(self.vectors)
+        return len(self._vectors)
+
+    def _replace_rows(
+        self,
+        vectors: npt.NDArray[np.float32],
+        metadata: npt.NDArray[Any],
+    ) -> None:
+        self._vectors = vectors
+        self._metadata = metadata
+        self._lock_row_storage()
+
+    def _lock_row_storage(self) -> None:
+        self._vectors.flags.writeable = False
+        self._metadata.flags.writeable = False
 
     def _metadata_to_array(
         self, metadata: Sequence[TMetadata] | npt.NDArray[Any]
@@ -406,7 +437,7 @@ class VectorStore(Generic[TMetadata]):
             raise ValueError("within_rows must contain integer row indexes")
 
         rows = rows.astype(np.intp, copy=False)
-        if np.any(rows < 0) or np.any(rows >= len(self.vectors)):
+        if np.any(rows < 0) or np.any(rows >= len(self._vectors)):
             raise IndexError("within_rows contains row indexes outside the store")
         return rows
 
@@ -431,16 +462,16 @@ class VectorStore(Generic[TMetadata]):
         if top_k <= 0:
             raise ValueError("top_k must be greater than 0")
 
-        if len(self.vectors) == 0:
+        if len(self._vectors) == 0:
             return []
 
         row_indices = None
-        selected_vectors = self.vectors
+        selected_vectors = self._vectors
         if within_rows is not None:
             row_indices = self._normalize_within_rows(within_rows)
             if len(row_indices) == 0:
                 return []
-            selected_vectors = self.vectors[row_indices]
+            selected_vectors = self._vectors[row_indices]
 
         values = values_fn(query_vector, selected_vectors)
 
@@ -485,7 +516,7 @@ class VectorStore(Generic[TMetadata]):
             VectorHit(
                 index=int(original_idx),
                 value=float(values[local_idx]),
-                metadata=self.metadata[original_idx],
+                metadata=self._metadata[original_idx],
             )
             for local_idx, original_idx in zip(
                 local_indices, original_indices, strict=True
@@ -540,8 +571,7 @@ class VectorStore(Generic[TMetadata]):
             non_finite_error_message="Loaded vectors contain non-finite values",
         )
 
-        self.vectors = loaded_vectors
-        self.metadata = archive.metadata
+        self._replace_rows(loaded_vectors, archive.metadata)
 
     def _write_archive(self, destination: Path) -> None:
         try:
@@ -559,8 +589,8 @@ class VectorStore(Generic[TMetadata]):
                     format_version=np.array(_ARCHIVE_FORMAT_VERSION, dtype=np.int64),
                     dimensions=np.array(self._dimensions, dtype=np.int64),
                     normalize=np.array(self._normalize, dtype=np.bool_),
-                    vectors=self.vectors.astype(np.float32, copy=False),
-                    metadata=np.array(self.metadata, copy=True),
+                    vectors=self._vectors.astype(np.float32, copy=False),
+                    metadata=np.array(self._metadata, copy=True),
                 )
             if destination_mode is not None:
                 temporary_path.chmod(destination_mode)
