@@ -183,6 +183,64 @@ Version 0.5 will finish that transition, then address a separate ownership
 problem: public arrays currently let callers change normalized vectors, resize
 row storage, or separate vectors from their metadata without validation.
 
+### API at a glance
+
+The intended public surface remains small. Most 0.4 call sites continue to work
+unchanged:
+
+```python
+store = VectorStore(dimensions=1536, normalize=True)
+store.add(vectors, metadata)
+
+hits = store.cosine_search(query, top_k=10)
+hits = store.dot_search(query, top_k=10)
+hits = store.euclidean_search(query, top_k=10)
+
+row = store.get(0)
+store.clear()
+
+store.save("vectors.npz")
+store.save()
+
+loaded = VectorStore.open("vectors.npz")
+loaded.reload()
+```
+
+Configuration and rows remain available for inspection:
+
+```python
+store.dimensions
+store.normalize
+store.file_path
+store.vectors
+store.metadata
+len(store)
+```
+
+The complete change from 0.4 is:
+
+| Area | 0.4 | 0.5 |
+|---|---|---|
+| Create a store | `VectorStore(dimensions, normalize=...)` | Unchanged |
+| Constructor `file_path=` | Works with `FutureWarning` | Removed |
+| Open an archive | `VectorStore.open(path)` | Unchanged |
+| Save and bind | `save(path)` | Unchanged |
+| Save again | `save()` | Unchanged |
+| Refresh from disk | `reload()` | Unchanged |
+| Instance `load()` | Works with `FutureWarning` | Removed |
+| Context manager | Works with `FutureWarning` | Removed |
+| Unversioned archive | Temporary migration reader | Reader removed |
+| Format version 1 archive | Supported | Supported unchanged |
+| `dimensions`, `normalize`, `file_path` | Writable attributes | Read-only properties |
+| `vectors`, `metadata` | Writable owning arrays | Read-only active-row views |
+| Vector returned by `get()` | View into live storage | Independent copy |
+| `add()` | Recopies existing rows | Amortized capacity growth |
+| Equal search values | Unspecified order | Lower store row index first |
+| Thread safety | Not formally defined | Read-only concurrency documented |
+
+The package continues to expose `VectorStore` and `VectorHit`; 0.5 does not add
+a document, state, snapshot, builder, or storage class.
+
 ### Persistence bridge removal
 
 Version 0.5 will remove the four compatibility paths that warned throughout
@@ -230,6 +288,24 @@ Read-only metadata protects the store's row structure, not the contents of an
 opaque Python payload. A dict, list, dataclass, or application object remains
 the same object supplied by the caller. The library will not deep-copy or
 freeze arbitrary metadata objects.
+
+In practice, matrix inspection and row retrieval have different ownership:
+
+```python
+vectors = store.vectors
+metadata = store.metadata
+
+vectors[0, 0] = 10.0       # Rejected: read-only view
+metadata[0] = replacement  # Rejected: read-only row structure
+
+vector, payload = store.get(0)
+vector[0] = 10.0           # Allowed: independent copy
+payload["reviewed"] = True  # Allowed: shared opaque metadata object
+```
+
+Applications that need immutable metadata can store frozen application objects
+or copy payloads at their own boundary. The vector store will not impose one
+copying policy on every metadata type.
 
 ### Safe row retrieval
 
