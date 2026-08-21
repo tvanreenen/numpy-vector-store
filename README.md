@@ -361,10 +361,10 @@ the API stabilizes. Changes are documented in the [changelog](CHANGELOG.md) and
 GitHub release notes. Deprecated APIs will keep warning for at least one point
 release before removal.
 
-Version 0.4 supports Python 3.11 through 3.14 and NumPy 1.23.2 or newer. These
+Version 0.5 supports Python 3.11 through 3.14 and NumPy 1.23.2 or newer. These
 versions are listed in the package metadata and exercised in CI, including a
 dedicated check against the minimum NumPy version. Python 3.10 remains supported
-by the 0.3 release series but is not supported by 0.4.
+by the 0.3 release series but is not supported by 0.4 or 0.5.
 
 The project generally retains stable CPython versions until their upstream
 end-of-life, adds new versions after its dependencies and CI support them, and
