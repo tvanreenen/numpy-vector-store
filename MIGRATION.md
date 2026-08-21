@@ -36,6 +36,42 @@ The persistence changes from 0.4 to 0.5 are:
 | Context manager | Works with `FutureWarning` | Removed |
 | Unversioned archive | Temporary migration reader | Reader removed |
 | Format version 1 archive | Supported | Supported unchanged |
+| `dimensions`, `normalize`, `file_path` | Writable attributes | Read-only properties |
+| `vectors`, `metadata` | Writable owning arrays | Read-only inspection views |
+| Vector returned by `get()` | View into live storage | Independent `float32` copy |
+
+## Store-owned state
+
+Most code that reads configuration or uses NumPy operations for inspection and
+prefiltering remains unchanged. The familiar property names are still present:
+
+```python
+store.dimensions
+store.normalize
+store.file_path
+store.vectors
+store.metadata
+```
+
+The difference is ownership. Configuration cannot be assigned directly, and
+the vector and metadata arrays reject row mutation. Their views describe the
+rows present when the property was requested, so code should request a fresh
+view after `add()`, `clear()`, or `reload()`.
+
+Row retrieval deliberately treats vectors and metadata differently:
+
+```python
+vector, payload = store.get(0)
+
+vector[0] = 10.0           # Independent copy; the store is unchanged.
+payload["reviewed"] = True  # Shared application metadata object.
+```
+
+Vectors have one uniform NumPy representation, so copying a single row gives
+the caller clear ownership at bounded cost. Metadata can be any Python object,
+so the store preserves payload identity instead of imposing a potentially
+expensive or invalid deep-copy policy. Applications that need immutable
+metadata can use frozen application objects or copy payloads themselves.
 
 ## Creating and saving a new store
 

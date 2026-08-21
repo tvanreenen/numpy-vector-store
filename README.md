@@ -70,6 +70,34 @@ Each payload can be a dict, dataclass, tuple, list, string, integer row ID, or
 another Python object that fits your application. Tuple and list payloads remain
 single row values rather than being interpreted as additional array dimensions.
 
+## State ownership
+
+The store owns its configuration and row structure. `dimensions`, `normalize`,
+and `file_path` are readable properties, but callers cannot assign them
+directly. Use the constructor for configuration, `open(path)` to open an
+archive, and `save(path)` to establish or change a binding.
+
+`store.vectors` and `store.metadata` are read-only, moment-in-time NumPy views.
+They provide zero-copy inspection of the current rows, including metadata
+prefiltering, without allowing callers to replace a row or alter a stored
+vector. Request a fresh view after `add()`, `clear()`, or `reload()` when current
+rows are required.
+
+`get(index)` has a narrower ownership boundary:
+
+```python
+vector, payload = store.get(0)
+
+vector[0] = 10.0           # Independent copy; the store is unchanged.
+payload["reviewed"] = True  # Shared application metadata object.
+```
+
+The returned vector is an independent `float32` copy. The metadata payload is
+the same opaque object supplied to `add()` or restored from the archive; the
+store protects the metadata row structure but does not deep-copy arbitrary
+dicts, lists, dataclasses, or application objects. Applications that require
+immutable payloads can use frozen objects or copy them at their own boundary.
+
 ## Normalization
 
 `VectorStore` defaults to `normalize=True`, which scales each stored vector to
@@ -109,7 +137,7 @@ compared reliably.
 | `euclidean_search` | Distance between normalized directions; useful only when direction-normalized distance is intended | True Euclidean distance over original vectors; use for geometric/feature-space nearest neighbors |
 | `get` | Returns normalized vectors | Returns original vectors |
 | `save` | Saves normalized vectors | Saves raw vectors |
-| `load` | Loads and normalizes vectors | Loads vectors exactly as stored |
+| `open` and `reload` | Restore normalized storage semantics | Restore raw vectors exactly as stored |
 
 ## Search Methods
 
