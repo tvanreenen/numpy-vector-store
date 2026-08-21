@@ -1343,6 +1343,26 @@ class TestVectorStore:
         expected = np.array([0.6, 0.8]) if normalize else np.array([3.0, 4.0])
         np.testing.assert_array_almost_equal(opened.get(0)[0], expected)
 
+    def test_open_reads_published_0_4_format_version_1_fixture(self):
+        """Test the current reader opens a real archive written by version 0.4."""
+        fixture_path = (
+            Path(__file__).parent / "fixtures" / "vector-store-0.4.0-format-v1.npz"
+        )
+
+        store = VectorStore[dict[str, object]].open(fixture_path)
+
+        assert store.dimensions == 3
+        assert store.normalize is False
+        assert store.file_path == fixture_path
+        np.testing.assert_array_equal(
+            store.vectors,
+            np.array([[1.5, -2.0, 0.25], [0.0, 3.0, 4.0]], dtype=np.float32),
+        )
+        assert store.metadata.tolist() == [
+            {"id": "alpha", "tags": ("legacy", 4)},
+            {"id": "beta", "active": True},
+        ]
+
     def test_open_resolves_extensionless_path(self, tmp_path):
         """Test open uses the same extension resolution as save."""
         extensionless_path = tmp_path / "vectors"
