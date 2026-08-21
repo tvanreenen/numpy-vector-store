@@ -517,7 +517,7 @@ class VectorStore(Generic[TMetadata]):
 
         values = values_fn(query_vector, selected_vectors)
 
-        valid_local_indices = np.arange(len(values))
+        valid_local_indices = np.arange(len(values), dtype=np.intp)
         if min_value is not None:
             valid_local_indices = valid_local_indices[
                 values[valid_local_indices] >= min_value
@@ -531,28 +531,20 @@ class VectorStore(Generic[TMetadata]):
             return []
 
         valid_values = values[valid_local_indices]
-        result_count = min(top_k, len(valid_local_indices))
-        if result_count < len(valid_local_indices):
-            if descending:
-                top_valid_unsorted = np.argpartition(valid_values, -result_count)[
-                    -result_count:
-                ]
-            else:
-                top_valid_unsorted = np.argpartition(valid_values, result_count - 1)[
-                    :result_count
-                ]
-        else:
-            top_valid_unsorted = np.arange(len(valid_values))
-
-        sort_order = np.argsort(valid_values[top_valid_unsorted])
-        if descending:
-            sort_order = sort_order[::-1]
-
-        top_valid_sorted = top_valid_unsorted[sort_order]
-        local_indices = valid_local_indices[top_valid_sorted]
-        original_indices = (
-            local_indices if row_indices is None else row_indices[local_indices]
+        valid_original_indices = (
+            valid_local_indices
+            if row_indices is None
+            else row_indices[valid_local_indices]
         )
+        result_count = min(top_k, len(valid_local_indices))
+        top_positions = self._top_result_positions(
+            valid_values,
+            valid_original_indices,
+            result_count=result_count,
+            descending=descending,
+        )
+        local_indices = valid_local_indices[top_positions]
+        original_indices = valid_original_indices[top_positions]
 
         return [
             VectorHit(
@@ -564,6 +556,36 @@ class VectorStore(Generic[TMetadata]):
                 local_indices, original_indices, strict=True
             )
         ]
+
+    @staticmethod
+    def _top_result_positions(
+        values: npt.NDArray[np.float32] | npt.NDArray[np.float64],
+        original_indices: npt.NDArray[np.intp],
+        *,
+        result_count: int,
+        descending: bool,
+    ) -> npt.NDArray[np.intp]:
+        """Select result positions by metric value, then original store index."""
+        if result_count < len(values):
+            partition_index = (
+                len(values) - result_count if descending else result_count - 1
+            )
+            cutoff = np.partition(values, partition_index)[partition_index]
+            better = values > cutoff if descending else values < cutoff
+            selected = np.flatnonzero(better)
+            tied = np.flatnonzero(values == cutoff)
+            remaining = result_count - len(selected)
+            if remaining < len(tied):
+                tied = tied[
+                    np.argpartition(original_indices[tied], remaining - 1)[:remaining]
+                ]
+            selected = np.concatenate((selected, tied))
+        else:
+            selected = np.arange(len(values), dtype=np.intp)
+
+        primary_values = -values[selected] if descending else values[selected]
+        order = np.lexsort((original_indices[selected], primary_values))
+        return np.asarray(selected[order], dtype=np.intp)
 
     @classmethod
     def _read_archive(

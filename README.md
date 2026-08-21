@@ -193,6 +193,18 @@ store.add(vectors, metadata)
 hits = store.euclidean_search(query, top_k=10, max_value=1.5)
 ```
 
+### Result ordering
+
+Cosine and dot-product results are ordered from larger values to smaller
+values. Euclidean results are ordered from smaller distances to larger ones.
+When two computed values are exactly equal, the row with the lower original
+store index comes first.
+
+The same rule determines which tied rows cross the `top_k` boundary. It also
+applies to `within_rows`: the original store index breaks a tie, regardless of
+the order in which filtered row indexes were supplied. Values that are close
+but not exactly equal remain ordered by their computed metric value.
+
 ## Prefiltering
 
 The store does not implement a metadata query language. To filter by metadata,
@@ -239,6 +251,24 @@ for hit in hits:
     row = metadata_table[hit.metadata]
     print(row["title"], hit.value)
 ```
+
+## Thread safety
+
+`VectorStore` does not use internal locks. Multiple threads may call search,
+`get()`, or the inspection properties on the same instance while its rows,
+configuration, binding, and metadata payloads remain unchanged.
+
+If any thread may call `add()`, `clear()`, `reload()`, or `save()`, every access
+to that store must use the same application-level lock or another external
+synchronization mechanism. The same rule applies when application code mutates
+a metadata payload shared with the store. In particular, do not overlap a save
+with an in-memory mutation: an atomic file replacement cannot turn two separate
+array reads into a consistent store snapshot.
+
+Separate store instances writing the same path also need external writer
+coordination. Atomic replacement prevents readers from seeing a partially
+written archive, but concurrent writers can replace one another and the last
+successful replacement wins.
 
 ## Persistence
 
