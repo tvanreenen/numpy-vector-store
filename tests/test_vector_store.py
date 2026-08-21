@@ -645,6 +645,32 @@ class TestVectorStore:
 
         assert np.shares_memory(received_vectors[0], store.vectors)
 
+    def test_small_top_k_uses_partial_selection_before_sorting(self, monkeypatch):
+        """Test a small top-k search does not fully sort every candidate."""
+        store = VectorStore[int](dimensions=1, normalize=False)
+        store.add([[float(value)] for value in range(8)], list(range(8)))
+        partition_calls = []
+        lexsort_widths = []
+        original_partition = np.partition
+        original_lexsort = np.lexsort
+
+        def record_partition(values, kth):
+            partition_calls.append((len(values), kth))
+            return original_partition(values, kth)
+
+        def record_lexsort(keys):
+            lexsort_widths.append(len(keys[0]))
+            return original_lexsort(keys)
+
+        monkeypatch.setattr(np, "partition", record_partition)
+        monkeypatch.setattr(np, "lexsort", record_lexsort)
+
+        results = store.dot_search([1.0], top_k=2)
+
+        assert [hit.index for hit in results] == [7, 6]
+        assert partition_calls == [(8, 6)]
+        assert lexsort_widths == [2]
+
     @pytest.mark.parametrize(
         "search_name", ["cosine_search", "dot_search", "euclidean_search"]
     )
