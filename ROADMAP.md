@@ -274,15 +274,22 @@ private state. The existing public names remain available for inspection:
   Callers can inspect the store's configuration and binding but cannot bypass
   the constructor, archive validation, or Save As behavior by assigning to
   them.
-- `vectors` returns a read-only NumPy view over the active vector rows. Spare
-  ingestion capacity, if any, is never exposed.
-- `metadata` returns a read-only one-dimensional object-array view over the
-  active metadata rows.
+- `vectors` returns a zero-copy, non-writeable NumPy view over the active vector
+  rows. Spare ingestion capacity, if any, is never exposed.
+- `metadata` returns a zero-copy, non-writeable one-dimensional object-array
+  view over the active metadata rows.
 
 These array views describe the store at the time they are requested. Code that
 keeps a view across `add()`, `clear()`, or `reload()` must request a new view
-before assuming it represents current rows. The returned arrays reject element,
-shape, and ordering changes through the public reference.
+before assuming it represents current rows. Direct item assignment and ordinary
+attempts to enable writes are rejected.
+
+The views protect against accidental mutation through the supported API; they
+are not tamper-proof snapshots. Deliberately mutating backing storage through
+`.base`, private attributes, `ctypes`, or similar escape hatches is unsupported
+and can corrupt store invariants. Callers that need independently mutable
+full-array snapshots can use `.copy()`. Copying `metadata` isolates its outer
+row array but continues to share the opaque payload objects.
 
 Read-only metadata protects the store's row structure, not the contents of an
 opaque Python payload. A dict, list, dataclass, or application object remains

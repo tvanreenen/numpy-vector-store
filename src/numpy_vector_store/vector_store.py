@@ -61,13 +61,43 @@ class VectorStore(Generic[TMetadata]):
         if dimensions <= 0:
             raise ValueError("dimensions must be greater than 0")
 
-        self.dimensions = dimensions
-        self.file_path: Path | None = None
-        self.normalize = normalize
-        self.vectors: npt.NDArray[np.float32] = np.empty(
+        self._dimensions = dimensions
+        self._file_path: Path | None = None
+        self._normalize = normalize
+        self._vectors: npt.NDArray[np.float32] = np.empty(
             (0, dimensions), dtype=np.float32
         )
-        self.metadata: npt.NDArray[Any] = np.array([], dtype=object)
+        self._metadata: npt.NDArray[Any] = np.array([], dtype=object)
+        self._lock_row_storage()
+
+    @property
+    def dimensions(self) -> int:
+        """Return the configured vector width."""
+        return self._dimensions
+
+    @property
+    def normalize(self) -> bool:
+        """Return whether vectors use normalized storage semantics."""
+        return self._normalize
+
+    @property
+    def file_path(self) -> Path | None:
+        """Return the currently bound archive path, if any."""
+        return self._file_path
+
+    @property
+    def vectors(self) -> npt.NDArray[np.float32]:
+        """Return a zero-copy, non-writeable view of the current vectors."""
+        view = self._vectors.view()
+        view.flags.writeable = False
+        return view
+
+    @property
+    def metadata(self) -> npt.NDArray[Any]:
+        """Return a zero-copy, non-writeable view of the current metadata rows."""
+        view = self._metadata.view()
+        view.flags.writeable = False
+        return view
 
     @classmethod
     def open(cls, path: str | Path) -> VectorStore[TMetadata]:
@@ -78,7 +108,7 @@ class VectorStore(Generic[TMetadata]):
 
         archive = cls._read_archive(resolved_path)
         store = cls(dimensions=archive.dimensions, normalize=archive.normalize)
-        store.file_path = resolved_path
+        store._file_path = resolved_path
         store._replace_with_archive(archive)
         return store
 
@@ -95,9 +125,9 @@ class VectorStore(Generic[TMetadata]):
         if vectors_2d.ndim != 2:
             raise ValueError("vectors must be a 2D array")
 
-        if vectors_2d.shape[1] != self.dimensions:
+        if vectors_2d.shape[1] != self._dimensions:
             raise ValueError(
-                f"Vector dimensions {vectors_2d.shape[1]} doesn't match store dimensions {self.dimensions}"
+                f"Vector dimensions {vectors_2d.shape[1]} doesn't match store dimensions {self._dimensions}"
             )
 
         metadata_array = self._metadata_to_array(metadata)
@@ -113,31 +143,32 @@ class VectorStore(Generic[TMetadata]):
             non_finite_error_message="Cannot add vectors containing non-finite values",
         )
 
-        if len(self.vectors) == 0:
-            self.vectors = vectors_to_store
+        if len(self._vectors) == 0:
+            combined_vectors = vectors_to_store
         else:
-            self.vectors = np.vstack([self.vectors, vectors_to_store]).astype(
+            combined_vectors = np.vstack([self._vectors, vectors_to_store]).astype(
                 np.float32, copy=False
             )
 
-        self.metadata = np.append(self.metadata, metadata_array)
+        combined_metadata = np.append(self._metadata, metadata_array)
+        self._replace_rows(combined_vectors, combined_metadata)
 
     def reload(self) -> None:
         """Refresh this store from its bound archive path."""
-        if self.file_path is None:
+        if self._file_path is None:
             raise ValueError("reload() requires a bound file path")
 
-        archive = self._read_archive(self.file_path)
+        archive = self._read_archive(self._file_path)
         self._replace_with_archive(archive)
 
     def save(self, path: str | Path | None = None) -> None:
         """Save the store and bind an explicitly supplied destination path."""
-        destination = self.file_path if path is None else self._resolve_file_path(path)
+        destination = self._file_path if path is None else self._resolve_file_path(path)
         if destination is None:
             raise ValueError("save() requires a file path for an unbound store")
 
         self._write_archive(destination)
-        self.file_path = destination
+        self._file_path = destination
 
     def cosine_search(
         self,
@@ -221,7 +252,7 @@ class VectorStore(Generic[TMetadata]):
         """Compute cosine similarity values."""
         query_norm = self._normalize_query(query)
 
-        if self.normalize:
+        if self._normalize:
             values = np.dot(vectors, query_norm)
         else:
             vector_norms = self._row_norms(vectors)
@@ -243,7 +274,7 @@ class VectorStore(Generic[TMetadata]):
         self, query: npt.NDArray[np.float32], vectors: npt.NDArray[np.float32]
     ) -> npt.NDArray[np.float64]:
         """Compute dot product values."""
-        if self.normalize:
+        if self._normalize:
             query = self._normalize_query(query)
             values = np.dot(vectors, query)
         else:
@@ -259,7 +290,7 @@ class VectorStore(Generic[TMetadata]):
         self, query: npt.NDArray[np.float32], vectors: npt.NDArray[np.float32]
     ) -> npt.NDArray[np.float64]:
         """Compute Euclidean distance values."""
-        if self.normalize:
+        if self._normalize:
             query = self._normalize_query(query)
             differences = vectors - query
         else:
@@ -269,18 +300,33 @@ class VectorStore(Generic[TMetadata]):
 
     def get(self, index: int) -> tuple[npt.NDArray[np.float32], TMetadata] | None:
         """Get a stored vector and metadata payload by row index."""
-        if 0 <= index < len(self.vectors):
-            return (self.vectors[index], self.metadata[index])
+        if 0 <= index < len(self._vectors):
+            return (self._vectors[index].copy(), self._metadata[index])
         return None
 
     def clear(self) -> None:
         """Clear all vectors and metadata from the store."""
-        self.vectors = np.empty((0, self.dimensions), dtype=np.float32)
-        self.metadata = np.array([], dtype=object)
+        self._replace_rows(
+            np.empty((0, self._dimensions), dtype=np.float32),
+            np.array([], dtype=object),
+        )
 
     def __len__(self) -> int:
         """Return the number of stored vector rows."""
-        return len(self.vectors)
+        return len(self._vectors)
+
+    def _replace_rows(
+        self,
+        vectors: npt.NDArray[np.float32],
+        metadata: npt.NDArray[Any],
+    ) -> None:
+        self._vectors = vectors
+        self._metadata = metadata
+        self._lock_row_storage()
+
+    def _lock_row_storage(self) -> None:
+        self._vectors.flags.writeable = False
+        self._metadata.flags.writeable = False
 
     def _metadata_to_array(
         self, metadata: Sequence[TMetadata] | npt.NDArray[Any]
@@ -317,7 +363,7 @@ class VectorStore(Generic[TMetadata]):
         if not np.all(np.isfinite(vectors)):
             raise ValueError(non_finite_error_message)
 
-        if self.normalize:
+        if self._normalize:
             norms = self._validate_non_zero_vectors(
                 vectors,
                 zero_norm_error_message=zero_norm_error_message,
@@ -349,9 +395,9 @@ class VectorStore(Generic[TMetadata]):
         query_vector = self._to_float32_array(query)
         if query_vector.ndim != 1:
             raise ValueError("Query vector must be a 1D array")
-        if len(query_vector) != self.dimensions:
+        if len(query_vector) != self._dimensions:
             raise ValueError(
-                f"Query vector dimension {len(query_vector)} doesn't match store dimensions {self.dimensions}"
+                f"Query vector dimension {len(query_vector)} doesn't match store dimensions {self._dimensions}"
             )
         if not np.all(np.isfinite(query_vector)):
             raise ValueError("Query vector must contain only finite values")
@@ -391,7 +437,7 @@ class VectorStore(Generic[TMetadata]):
             raise ValueError("within_rows must contain integer row indexes")
 
         rows = rows.astype(np.intp, copy=False)
-        if np.any(rows < 0) or np.any(rows >= len(self.vectors)):
+        if np.any(rows < 0) or np.any(rows >= len(self._vectors)):
             raise IndexError("within_rows contains row indexes outside the store")
         return rows
 
@@ -416,16 +462,16 @@ class VectorStore(Generic[TMetadata]):
         if top_k <= 0:
             raise ValueError("top_k must be greater than 0")
 
-        if len(self.vectors) == 0:
+        if len(self._vectors) == 0:
             return []
 
         row_indices = None
-        selected_vectors = self.vectors
+        selected_vectors = self._vectors
         if within_rows is not None:
             row_indices = self._normalize_within_rows(within_rows)
             if len(row_indices) == 0:
                 return []
-            selected_vectors = self.vectors[row_indices]
+            selected_vectors = self._vectors[row_indices]
 
         values = values_fn(query_vector, selected_vectors)
 
@@ -470,7 +516,7 @@ class VectorStore(Generic[TMetadata]):
             VectorHit(
                 index=int(original_idx),
                 value=float(values[local_idx]),
-                metadata=self.metadata[original_idx],
+                metadata=self._metadata[original_idx],
             )
             for local_idx, original_idx in zip(
                 local_indices, original_indices, strict=True
@@ -525,8 +571,7 @@ class VectorStore(Generic[TMetadata]):
             non_finite_error_message="Loaded vectors contain non-finite values",
         )
 
-        self.vectors = loaded_vectors
-        self.metadata = archive.metadata
+        self._replace_rows(loaded_vectors, archive.metadata)
 
     def _write_archive(self, destination: Path) -> None:
         try:
@@ -542,10 +587,10 @@ class VectorStore(Generic[TMetadata]):
                 np.savez_compressed(
                     temporary_file,
                     format_version=np.array(_ARCHIVE_FORMAT_VERSION, dtype=np.int64),
-                    dimensions=np.array(self.dimensions, dtype=np.int64),
-                    normalize=np.array(self.normalize, dtype=np.bool_),
-                    vectors=self.vectors.astype(np.float32, copy=False),
-                    metadata=np.array(self.metadata, copy=True),
+                    dimensions=np.array(self._dimensions, dtype=np.int64),
+                    normalize=np.array(self._normalize, dtype=np.bool_),
+                    vectors=self._vectors.astype(np.float32, copy=False),
+                    metadata=np.array(self._metadata, copy=True),
                 )
             if destination_mode is not None:
                 temporary_path.chmod(destination_mode)
@@ -585,13 +630,13 @@ class VectorStore(Generic[TMetadata]):
     ) -> None:
         if dimensions <= 0:
             raise ValueError("Persisted dimensions must be greater than 0")
-        if dimensions != self.dimensions:
+        if dimensions != self._dimensions:
             raise ValueError(
-                f"Persisted dimensions {dimensions} do not match store dimensions {self.dimensions}"
+                f"Persisted dimensions {dimensions} do not match store dimensions {self._dimensions}"
             )
-        if normalize != self.normalize:
+        if normalize != self._normalize:
             raise ValueError(
-                f"Persisted normalize setting {normalize} does not match store normalize setting {self.normalize}"
+                f"Persisted normalize setting {normalize} does not match store normalize setting {self._normalize}"
             )
 
     @staticmethod
@@ -612,9 +657,9 @@ class VectorStore(Generic[TMetadata]):
         if loaded_vectors.ndim != 2:
             raise ValueError("Loaded vectors must be a 2D array")
 
-        if loaded_vectors.shape[1] != self.dimensions:
+        if loaded_vectors.shape[1] != self._dimensions:
             raise ValueError(
-                f"Loaded vector dimension {loaded_vectors.shape[1]} doesn't match store dimensions {self.dimensions}"
+                f"Loaded vector dimension {loaded_vectors.shape[1]} doesn't match store dimensions {self._dimensions}"
             )
 
         if loaded_metadata.ndim != 1:

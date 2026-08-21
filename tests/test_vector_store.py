@@ -50,6 +50,21 @@ class TestVectorStore:
         with pytest.raises(ValueError, match="dimensions"):
             VectorStore(dimensions=0)
 
+    @pytest.mark.parametrize(
+        ("name", "value"),
+        [
+            ("dimensions", 3),
+            ("normalize", False),
+            ("file_path", Path("other.npz")),
+        ],
+    )
+    def test_configuration_properties_are_read_only(self, name, value):
+        """Test configuration and archive binding cannot be assigned directly."""
+        store = VectorStore(dimensions=2)
+
+        with pytest.raises(AttributeError, match=name):
+            setattr(store, name, value)
+
     def test_removed_persistence_entry_points_are_not_supported(self, tmp_path):
         """Test 0.4 constructor binding and instance loading are gone."""
         with pytest.raises(TypeError, match="file_path"):
@@ -139,7 +154,7 @@ class TestVectorStore:
         store.add([[1.0, 0.0]], [payload])
 
         assert store.metadata.shape == (1,)
-        assert store.get(0)[1] == payload
+        assert store.get(0)[1] is payload
 
     def test_add_rejects_mismatched_lengths(self):
         """Test add rejects mismatched vector and metadata counts."""
@@ -496,7 +511,7 @@ class TestVectorStore:
             max_value=None,
         )
 
-        assert received_vectors[0] is store.vectors
+        assert np.shares_memory(received_vectors[0], store.vectors)
 
     @pytest.mark.parametrize(
         "search_name", ["cosine_search", "dot_search", "euclidean_search"]
@@ -599,6 +614,71 @@ class TestVectorStore:
         )
         assert retrieved_metadata == metadata
         assert store.get(1) is None
+
+    def test_get_returns_an_independent_vector_and_shared_metadata(self):
+        """Test callers own retrieved vectors but not opaque metadata payloads."""
+        metadata = {"reviewed": False}
+        store = VectorStore[dict[str, bool]](dimensions=2, normalize=False)
+        store.add([[1.0, 2.0]], [metadata])
+
+        entry = store.get(0)
+        assert entry is not None
+        vector, payload = entry
+        vector[0] = 10.0
+        payload["reviewed"] = True
+
+        assert vector.dtype == np.float32
+        np.testing.assert_array_equal(store.vectors[0], np.array([1.0, 2.0]))
+        assert store.metadata[0] is metadata
+        assert store.metadata[0] == {"reviewed": True}
+
+    def test_row_inspection_views_are_read_only(self):
+        """Test inspection cannot replace or mutate store-owned row structure."""
+        store = VectorStore[dict[str, int]](dimensions=2, normalize=False)
+        store.add([[1.0, 2.0]], [{"id": 1}])
+        vectors = store.vectors
+        metadata = store.metadata
+
+        with pytest.raises(ValueError, match="read-only"):
+            vectors[0, 0] = 10.0
+        with pytest.raises(ValueError, match="read-only"):
+            metadata[0] = {"id": 2}
+        with pytest.raises(ValueError, match="WRITEABLE"):
+            vectors.flags.writeable = True
+        with pytest.raises(ValueError, match="WRITEABLE"):
+            metadata.flags.writeable = True
+
+        with pytest.raises(AttributeError, match="vectors"):
+            store.vectors = np.empty((0, 2), dtype=np.float32)  # type: ignore[misc]
+        with pytest.raises(AttributeError, match="metadata"):
+            store.metadata = np.array([], dtype=object)  # type: ignore[misc]
+
+    def test_row_inspection_views_are_moment_in_time(self):
+        """Test mutation requires a fresh view to inspect the current rows."""
+        store = VectorStore[int](dimensions=2, normalize=False)
+        store.add([[1.0, 0.0]], [1])
+        vectors = store.vectors
+        metadata = store.metadata
+
+        store.add([[0.0, 1.0]], [2])
+
+        assert vectors.shape == (1, 2)
+        assert metadata.tolist() == [1]
+        assert store.vectors.shape == (2, 2)
+        assert store.metadata.tolist() == [1, 2]
+
+    def test_row_inspection_copies_are_independently_mutable(self):
+        """Test explicit full-array copies cannot change store-owned rows."""
+        store = VectorStore[dict[str, int]](dimensions=2, normalize=False)
+        store.add([[1.0, 2.0]], [{"id": 1}])
+        vectors = store.vectors.copy()
+        metadata = store.metadata.copy()
+
+        vectors[0, 0] = 10.0
+        metadata[0] = {"id": 2}
+
+        np.testing.assert_array_equal(store.vectors[0], np.array([1.0, 2.0]))
+        assert store.metadata[0] == {"id": 1}
 
     def test_clear(self):
         """Test clearing the store."""
@@ -875,7 +955,7 @@ class TestVectorStore:
         np.testing.assert_array_almost_equal(opened.get(0)[0], expected)
 
     def test_open_resolves_extensionless_path(self, tmp_path):
-        """Test open uses the same extension resolution as save and load."""
+        """Test open uses the same extension resolution as save."""
         extensionless_path = tmp_path / "vectors"
         expected_path = tmp_path / "vectors.npz"
         persisted = VectorStore(dimensions=2)
