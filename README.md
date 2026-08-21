@@ -112,6 +112,20 @@ store protects the metadata row structure but does not deep-copy arbitrary
 dicts, lists, dataclasses, or application objects. Applications that require
 immutable payloads can use frozen objects or copy them at their own boundary.
 
+## Repeated additions
+
+`add()` accepts one row or a batch, and preserves insertion order in either
+case. The store keeps private spare capacity so repeated small additions do not
+copy every existing row on every call. When that capacity is full, the vector
+and metadata arrays grow together and the active rows are copied once.
+
+Spare capacity is internal. `len(store)`, inspection views, search, `get()`, and
+saved archives contain only rows that were added. `clear()` releases both the
+active rows and any reserved capacity held by the store. As with any NumPy
+view, an older inspection view keeps its previous buffer alive until that view
+is released. Adding a batch is still preferable when the application already
+has one because it also reduces per-call validation and Python overhead.
+
 ## Normalization
 
 `VectorStore` defaults to `normalize=True`, which scales each stored vector to
