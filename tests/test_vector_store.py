@@ -732,6 +732,8 @@ class TestVectorStore:
             ([0.0], TypeError, "integer"),
             ([True], TypeError, "integer"),
             ([np.bool_(True)], TypeError, "integer"),
+            ([0, True], TypeError, "integer"),
+            ([np.int64(0), np.bool_(True)], TypeError, "integer"),
             ([0, 0], ValueError, "unique"),
         ],
     )

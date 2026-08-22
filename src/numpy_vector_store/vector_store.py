@@ -513,9 +513,12 @@ class VectorStore(Generic[TMetadata]):
         if isinstance(within_rows, np.ndarray):
             rows = np.asarray(within_rows)
         else:
-            has_nested_rows = any(
-                isinstance(row, (list, tuple, np.ndarray)) for row in within_rows
-            )
+            has_nested_rows = False
+            for row in within_rows:
+                if isinstance(row, (bool, np.bool_)):
+                    raise TypeError("within_rows must contain integer row indexes")
+                if isinstance(row, (list, tuple, np.ndarray)):
+                    has_nested_rows = True
             rows = np.asarray(
                 within_rows,
                 dtype=object if has_nested_rows else None,
