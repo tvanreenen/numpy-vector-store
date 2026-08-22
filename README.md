@@ -127,6 +127,9 @@ rejected.
 
 `within_rows` must be a one-dimensional sequence of unique integer row indexes.
 Python and NumPy integers are accepted; booleans and non-integer values are not.
+When supplied as a Python sequence, this includes a boolean mixed into otherwise
+integer values; NumPy's implicit conversion of that boolean to zero or one is
+not used as a row index.
 Malformed shapes and duplicate indexes raise `ValueError`, while an index
 outside the current store raises `IndexError`. These checks still run when the
 store is empty.
@@ -221,9 +224,10 @@ rules apply even when the store or `within_rows` selection is empty.
 ### Numerical inputs
 
 Stored vectors use `float32` to keep the store compact. Vectors and queries must
-remain finite when converted to `float32`, and search thresholds must also be
-finite. Invalid values are rejected before they can affect stored state or
-ranking.
+be real-valued array-like inputs that remain finite when converted to `float32`.
+Complex-valued inputs raise `TypeError` rather than silently losing their
+imaginary components. Search thresholds must also be finite. Invalid values are
+rejected before they can affect stored state or ranking.
 
 Norms and raw metric values use `float64` accumulation where `float32`
 intermediate calculations could overflow or underflow. This allows finite

@@ -424,8 +424,11 @@ class VectorStore(Generic[TMetadata]):
         return bool(value)
 
     def _to_float32_array(self, values: npt.ArrayLike) -> npt.NDArray[np.float32]:
+        values_array = np.asarray(values)
+        if np.iscomplexobj(values_array):
+            raise TypeError("vectors and queries must contain real numbers")
         with np.errstate(over="ignore", invalid="ignore"):
-            return np.asarray(values, dtype=np.float32)
+            return np.asarray(values_array, dtype=np.float32)
 
     def _prepare_vectors_for_storage(
         self,
@@ -513,9 +516,12 @@ class VectorStore(Generic[TMetadata]):
         if isinstance(within_rows, np.ndarray):
             rows = np.asarray(within_rows)
         else:
-            has_nested_rows = any(
-                isinstance(row, (list, tuple, np.ndarray)) for row in within_rows
-            )
+            has_nested_rows = False
+            for row in within_rows:
+                if isinstance(row, (bool, np.bool_)):
+                    raise TypeError("within_rows must contain integer row indexes")
+                if isinstance(row, (list, tuple, np.ndarray)):
+                    has_nested_rows = True
             rows = np.asarray(
                 within_rows,
                 dtype=object if has_nested_rows else None,
