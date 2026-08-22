@@ -4,6 +4,148 @@ This changelog records user-visible changes to NumPy Vector Store. Earlier
 release notes remain available on the
 [GitHub releases page](https://github.com/tvanreenen/numpy-vector-store/releases).
 
+## 0.6.0 - 2026-08-21
+
+This release makes the existing API's input and failure contracts predictable
+before 1.0. It closes cases where the same invalid call could behave
+differently on an empty and populated store, where Python booleans could act as
+row indexes or counts, and where loosely coerced configuration could change
+meaning after persistence. It also turns the project's performance claims and
+format-version-1 compatibility promise into reproducible regression evidence.
+
+Valid, documented 0.5 usage continues to work unchanged. Version 0.6 does not
+add a new feature family, archive format, runtime dependency, or public
+exception hierarchy.
+
+### API at a glance
+
+The complete workflow remains centered on `VectorStore` and `VectorHit`:
+
+```python
+store = VectorStore(dimensions=1536, normalize=True)
+store.add(vectors, metadata)
+
+hits = store.cosine_search(query, top_k=10)
+hits = store.dot_search(query, top_k=10, min_value=0.5)
+hits = store.euclidean_search(query, top_k=10, within_rows=row_indexes)
+
+row = store.get(0)
+store.clear()
+
+store.save("vectors.npz")
+store.save()
+
+loaded = VectorStore.open("vectors.npz")
+loaded.reload()
+```
+
+The ownership, amortized ingestion, deterministic tie ordering, explicit
+persistence lifecycle, and trusted-local-file boundary established in 0.5 are
+unchanged.
+
+### Predictable scalar inputs
+
+- Accept Python integers, NumPy integer scalars, and other values implementing
+  the standard integer-index protocol for `dimensions`, `top_k`, and
+  `get(index)`, then convert them to a Python `int`.
+- Reject Python and NumPy booleans where integer semantics are required.
+  `top_k=True` no longer means one, and `get(True)` no longer invokes NumPy
+  boolean indexing.
+- Continue requiring positive `dimensions` and `top_k` values. A valid integer
+  outside the stored row range still makes `get()` return `None`.
+- Accept Python and NumPy booleans for `normalize`, then retain a canonical
+  Python `bool` in memory and persistence.
+- Accept finite Python and NumPy integer or floating-point scalars for
+  `min_value` and `max_value`. Reject booleans, strings, complex values,
+  arrays, and non-finite thresholds before search.
+
+An inappropriate scalar type now raises `TypeError`, while a supported type
+with an invalid value raises `ValueError`. Row bounds continue using
+`IndexError` where row selectors require an existing row. Exact error wording
+remains explanatory rather than a compatibility guarantee.
+
+### Search checks independent of store state
+
+- Validate `within_rows` before returning an empty result. It must be a
+  one-dimensional sequence of unique integer row indexes, without booleans,
+  and every index must be within the current store.
+- Reject duplicate filtered indexes instead of returning the same stored row
+  more than once.
+- Apply the same zero-query rules before the empty-store shortcut. Cosine
+  search always requires a non-zero query. Dot-product and Euclidean searches
+  require one when the store normalizes vectors, while raw stores continue to
+  accept a zero query for those two metrics.
+- Keep selector validation vectorized for native NumPy integer arrays and avoid
+  changing process-global warning filters while validating Python sequences.
+
+These changes affect preconditions, not ranking. Valid 0.5 searches retain the
+same metric calculations, thresholds, deterministic tie handling, filtered-row
+semantics, and `VectorHit` results.
+
+### Persistence inputs and compatibility boundaries
+
+- Accept strings and string-returning path-like objects for `open()`,
+  `save(path)`, and bound archive paths. Reject an explicitly empty path with
+  `ValueError` and an inappropriate path type, including bytes paths, with
+  `TypeError`.
+- Keep `save()` with no argument distinct from `save("")`: omission means
+  "save to the current binding," while an empty string is an invalid path.
+- Preserve extension resolution. A path without `.npz` still resolves to the
+  same archive for saving, opening, and reloading.
+- Preserve owning exceptions at the persistence boundary. Filesystem failures
+  use the relevant `OSError` subclass, malformed archive schemas use
+  `ValueError`, and NumPy, pickle, or application metadata-loading failures are
+  not hidden inside a package-specific wrapper.
+
+Archive format version 1 is unchanged. The compatibility suite now includes an
+archive produced by the published 0.4.0 package on Python 3.11 with NumPy
+1.23.2 and verifies that the current reader recovers its configuration, vectors,
+and metadata. This is a forward-reading promise for the self-describing format,
+not support for older unversioned two-array archives or a promise that an old
+package can read an arbitrary future format. Persistence remains a trusted-file
+feature because opaque metadata uses NumPy's pickle-backed object arrays.
+
+### Reproducible performance evidence
+
+- Add repository benchmark commands for public exact search and ingestion.
+  Each command records the workload, seeded input digests, complete timing
+  samples, median, Python and NumPy versions, Git state, timer, thread-related
+  environment variables, and NumPy build configuration as JSON.
+- Measure prepared inputs and documented public operations rather than random
+  input generation. Search records complete query batches; ingestion records a
+  fresh store and every `add()` call.
+- Add structural regression checks for geometric capacity reuse, partial
+  top-k selection, and unfiltered access to the stored vector matrix without a
+  preliminary full-matrix copy.
+- Keep wall-clock limits out of shared CI, where runner load would make failures
+  noisy and machine-specific.
+
+The README now reports one aligned grid at 1,000, 10,000, and 100,000 rows for
+384, 1,536, and 3,072 dimensions, measured on a 24 GB Apple M4 Mac mini. It
+also makes the intended scale explicit: this project is for small-to-medium,
+in-process exact search. The 100,000-row measurements are an upper reference,
+not a target for indefinite scaling; routinely million-row workloads generally
+need an indexed or service-backed system.
+
+### Runtime compatibility and upgrade notes
+
+- Continue supporting Python 3.11 through 3.14 and NumPy 1.23.2 or newer.
+- Continue exercising every supported Python version in CI, including a
+  dedicated Python 3.11 job with the minimum NumPy version.
+- Keep the runtime wheel limited to the package. Benchmark tooling and its
+  guide are included in the source distribution without adding runtime
+  dependencies.
+- Require no archive conversion when upgrading from 0.5; format version 1 is
+  still the only supported archive format.
+
+Applications using documented 0.5 input types should not need code changes.
+Review call sites that pass booleans where integers are expected, fractional
+result counts, string or boolean thresholds, duplicate or malformed
+`within_rows` values, zero queries that were only attempted against empty
+stores, or explicitly empty persistence paths. Those accidentally accepted or
+state-dependent cases now fail at the public boundary with consistent standard
+exceptions.
+
 ## 0.5.0 - 2026-08-21
 
 This release gives `VectorStore` clear ownership of its configuration and row
