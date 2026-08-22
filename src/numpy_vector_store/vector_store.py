@@ -424,8 +424,11 @@ class VectorStore(Generic[TMetadata]):
         return bool(value)
 
     def _to_float32_array(self, values: npt.ArrayLike) -> npt.NDArray[np.float32]:
+        values_array = np.asarray(values)
+        if np.iscomplexobj(values_array):
+            raise TypeError("vectors and queries must contain real numbers")
         with np.errstate(over="ignore", invalid="ignore"):
-            return np.asarray(values, dtype=np.float32)
+            return np.asarray(values_array, dtype=np.float32)
 
     def _prepare_vectors_for_storage(
         self,

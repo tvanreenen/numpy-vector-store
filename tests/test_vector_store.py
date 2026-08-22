@@ -286,6 +286,22 @@ class TestVectorStore:
             with pytest.raises(ValueError, match="non-finite"):
                 store.add([[1e100, 1.0]], [{"id": "out-of-range"}])
 
+    @pytest.mark.parametrize(
+        "vectors",
+        [
+            [[1.0 + 2.0j, 0.0]],
+            np.array([[1.0 + 0.0j, 0.0]], dtype=np.complex64),
+        ],
+    )
+    def test_add_rejects_complex_vectors_without_changing_state(self, vectors):
+        """Test add does not discard imaginary vector components."""
+        store = VectorStore(dimensions=2, normalize=False)
+
+        with pytest.raises(TypeError, match="real numbers"):
+            store.add(vectors, [{"id": "complex"}])
+
+        assert len(store) == 0
+
     def test_cosine_search_returns_vector_hits(self):
         """Test preferred cosine_search returns typed vector hits."""
         store = VectorStore[dict[str, str]](dimensions=3)
@@ -877,6 +893,28 @@ class TestVectorStore:
             warnings.simplefilter("error", RuntimeWarning)
             with pytest.raises(ValueError, match="finite"):
                 store.cosine_search([1e100, 0.0])
+
+    @pytest.mark.parametrize(
+        "search_name", ["cosine_search", "dot_search", "euclidean_search"]
+    )
+    @pytest.mark.parametrize(
+        "query",
+        [
+            [1.0 + 2.0j, 0.0],
+            np.array([1.0 + 0.0j, 0.0], dtype=np.complex64),
+        ],
+    )
+    @pytest.mark.parametrize("populated", [False, True])
+    def test_metric_searches_reject_complex_queries_independent_of_state(
+        self, search_name, query, populated
+    ):
+        """Test searches do not discard imaginary query components."""
+        store = VectorStore(dimensions=2, normalize=False)
+        if populated:
+            store.add([[1.0, 0.0]], [{"id": "real"}])
+
+        with pytest.raises(TypeError, match="real numbers"):
+            getattr(store, search_name)(query)
 
     @pytest.mark.parametrize(
         ("search_name", "threshold_name"),
