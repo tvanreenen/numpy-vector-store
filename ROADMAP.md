@@ -36,7 +36,7 @@ compatibility contract and are exercised in CI. The project generally:
 - Drops a Python version only in a minor release and calls out the change in
   release notes.
 
-The 0.3 series supports Python 3.10 through 3.14. Versions 0.4 through 0.6
+The 0.3 series supports Python 3.10 through 3.14. Versions 0.4 through 0.7
 support Python 3.11 through 3.14, using the 0.4 minor-release boundary to remove
 Python 3.10 ahead of its upstream end-of-life in October 2026. NumPy 1.23.2 is
 the minimum for 0.4 and later because it is the earliest NumPy release that
@@ -460,12 +460,70 @@ metadata-query APIs. It does not introduce a validation dependency, public
 exception hierarchy, archive format version 2, or deep-copy policy for opaque
 metadata.
 
+## 0.7.0: Final contract closure before 1.0
+
+Status: in progress
+
+The 1.0 readiness audit found that the overall API, archive format, ownership
+model, search algorithms, and single-module architecture are ready to stabilize.
+Version 0.7 closes the few remaining observable contract gaps and lets those
+decisions run through a normal release cycle before 1.0 makes a long-term
+compatibility commitment.
+
+This is a hardening release, not an expansion of the library's scope. It keeps
+the constructor, three metric methods, explicit persistence lifecycle, generic
+metadata model, and format-version-1 archive.
+
+### Lossless input handling
+
+- Reject a boolean mixed into a Python `within_rows` sequence before NumPy can
+  coerce it to zero or one. Native NumPy integer selectors retain their
+  vectorized validation path.
+- Reject complex vector batches and queries before conversion to `float32` can
+  discard their imaginary components.
+- Add boundary coverage for these inputs while preserving existing shape,
+  uniqueness, bounds, finiteness, normalization, and state-independence rules.
+
+These inputs were only accepted because of NumPy coercion, not because the API
+defined boolean indexes or lossy complex conversion as supported behavior. A
+pre-1.0 minor release is the appropriate place to reject them clearly.
+
+### Stable archive bindings
+
+A relative path will be anchored to the process working directory when
+`open(path)` or `save(path)` first binds it. Later `save()` and `reload()` calls
+will keep referring to that same archive even if the process changes working
+directory. Extension handling and lexical symlink behavior will remain intact;
+the implementation does not need to resolve the filesystem target.
+
+This makes a bound path an actual store property rather than a path expression
+that can silently point somewhere else as unrelated application state changes.
+
+### Public and release contracts
+
+- Name the supported top-level public API and distinguish it from private
+  helpers, exact error wording, and implementation details.
+- Document how `VectorHit` equality and hashability inherit the behavior of its
+  opaque metadata payload.
+- Define the 1.x deprecation, removal, runtime-support, and archive-compatibility
+  policies, including the limits of old-reader and pickle portability promises.
+- Bring package license metadata and release validation up to current packaging
+  practice, and require the release tag, runtime version, and built metadata to
+  agree before publication.
+- Add targeted cross-platform persistence evidence and close remaining malformed
+  archive test gaps without turning shared CI into a performance benchmark.
+
+Version 0.7 does not add update, delete, document, context-manager, index,
+backend, streaming, async, builder, or metadata-query APIs. It does not split
+the cohesive `VectorStore` module, add runtime dependencies, customize
+`VectorHit` comparison, or introduce archive format version 2.
+
 ## 1.0.0: Stable contracts
 
 The project will be ready for 1.0 when:
 
-- The public API has completed at least one minor release cycle without
-  structural redesign.
+- The 0.7 public API and compatibility policy have completed a normal release
+  cycle without requiring structural redesign.
 - Public access cannot silently invalidate vector-store invariants.
 - Persistence is self-describing and has a documented migration policy.
 - Supported numeric inputs behave reliably across supported Python and NumPy
