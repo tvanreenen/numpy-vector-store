@@ -4,7 +4,7 @@ This changelog records user-visible changes to NumPy Vector Store. Earlier
 release notes remain available on the
 [GitHub releases page](https://github.com/tvanreenen/numpy-vector-store/releases).
 
-## 0.6.0 - 2026-08-21
+## 0.6.0 - 2026-08-22
 
 This release makes the existing API's input and failure contracts predictable
 before 1.0. It closes cases where the same invalid call could behave
