@@ -1137,6 +1137,71 @@ class TestVectorStore:
         assert opened.file_path == expected_path
         assert opened.get(0)[1] == {"id": "persisted"}
 
+    def test_relative_save_binding_survives_working_directory_changes(
+        self, tmp_path, monkeypatch
+    ):
+        """Test pathless saves keep using the archive bound by a relative path."""
+        initial_directory = tmp_path / "initial"
+        later_directory = tmp_path / "later"
+        initial_directory.mkdir()
+        later_directory.mkdir()
+        expected_path = initial_directory / "vectors.npz"
+        store = VectorStore[str](dimensions=2, normalize=False)
+        store.add([[1.0, 0.0]], ["first"])
+
+        monkeypatch.chdir(initial_directory)
+        store.save("vectors")
+        store.add([[0.0, 1.0]], ["second"])
+        monkeypatch.chdir(later_directory)
+        store.save()
+
+        assert store.file_path == expected_path
+        assert not (later_directory / "vectors.npz").exists()
+        assert VectorStore[str].open(expected_path).metadata.tolist() == [
+            "first",
+            "second",
+        ]
+
+    def test_relative_open_binding_survives_working_directory_changes(
+        self, tmp_path, monkeypatch
+    ):
+        """Test reload keeps using the archive opened through a relative path."""
+        archive_directory = tmp_path / "archive"
+        later_directory = tmp_path / "later"
+        archive_directory.mkdir()
+        later_directory.mkdir()
+        archive_path = archive_directory / "vectors.npz"
+        persisted = VectorStore[str](dimensions=2, normalize=False)
+        persisted.add([[1.0, 0.0]], ["first"])
+        persisted.save(archive_path)
+
+        monkeypatch.chdir(archive_directory)
+        opened = VectorStore[str].open("vectors")
+        monkeypatch.chdir(later_directory)
+        persisted.add([[0.0, 1.0]], ["second"])
+        persisted.save()
+        opened.reload()
+
+        assert opened.file_path == archive_path
+        assert opened.metadata.tolist() == ["first", "second"]
+
+    def test_relative_binding_keeps_symlink_path_lexical(self, tmp_path, monkeypatch):
+        """Test anchoring does not resolve a symlink in the supplied path."""
+        archive_directory = tmp_path / "archive"
+        archive_directory.mkdir()
+        linked_directory = tmp_path / "linked"
+        try:
+            linked_directory.symlink_to(archive_directory, target_is_directory=True)
+        except OSError:
+            pytest.skip("directory symlinks are unavailable on this platform")
+        store = VectorStore(dimensions=2)
+
+        monkeypatch.chdir(tmp_path)
+        store.save(Path("linked") / "vectors")
+
+        assert store.file_path == linked_directory / "vectors.npz"
+        assert (archive_directory / "vectors.npz").exists()
+
     @pytest.mark.parametrize("invalid_path", [None, 0, False, b"vectors", object()])
     def test_open_rejects_non_path_inputs(self, invalid_path):
         """Test open distinguishes invalid types from empty paths."""
