@@ -382,6 +382,12 @@ store.reload()
 the file is missing, or the archive is invalid. A failed reload leaves the
 current in-memory vectors and metadata unchanged.
 
+When `save(path)` or `open(path)` receives a relative path, the store anchors it
+to the current working directory as part of the binding. `file_path` therefore
+returns an absolute path, and a later working-directory change cannot redirect
+`save()` or `reload()` to another file. Anchoring does not canonicalize the path:
+`..` components and symlinks retain their normal filesystem meaning.
+
 The `.npz` suffix may be omitted. An extensionless path such as `"vectors"` is
 resolved to `"vectors.npz"` for saving, opening, and reloading.
 

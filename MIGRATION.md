@@ -180,7 +180,11 @@ different semantics.
 Paths may be strings or string-valued `os.PathLike` objects such as
 `pathlib.Path`. Empty paths raise `ValueError`, while bytes and other non-path
 values raise `TypeError`. A `None` path is meaningful only for `save()`, where
-it reuses an existing binding.
+it reuses an existing binding. A relative path is anchored to the current
+working directory when `save(path)` or `open(path)` binds it. The public
+`file_path` is therefore absolute, and later working-directory changes do not
+redirect pathless saves or reloads. Symlinks and `..` components are not
+canonicalized.
 
 The generic parameter still describes application metadata. It can be kept
 when useful:
