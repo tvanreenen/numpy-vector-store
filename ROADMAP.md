@@ -490,11 +490,11 @@ pre-1.0 minor release is the appropriate place to reject them clearly.
 
 ### Stable archive bindings
 
-A relative path will be anchored to the process working directory when
-`open(path)` or `save(path)` first binds it. Later `save()` and `reload()` calls
-will keep referring to that same archive even if the process changes working
-directory. Extension handling and lexical symlink behavior will remain intact;
-the implementation does not need to resolve the filesystem target.
+A relative path is anchored to the process working directory when `open(path)`
+or `save(path)` binds it. Later `save()` and `reload()` calls keep referring to
+that same archive even if the process changes working directory. Extension
+handling and lexical symlink behavior remain intact; the binding does not
+resolve the filesystem target.
 
 This makes a bound path an actual store property rather than a path expression
 that can silently point somewhere else as unrelated application state changes.

@@ -405,8 +405,8 @@ class VectorStore(Generic[TMetadata]):
 
         path = Path(raw_path)
         if path.suffix != ".npz":
-            return Path(f"{path}.npz")
-        return path
+            path = Path(f"{path}.npz")
+        return path.absolute()
 
     @staticmethod
     def _validate_integer(value: SupportsIndex, *, name: str) -> int:
