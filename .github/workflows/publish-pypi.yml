@@ -33,6 +33,11 @@ jobs:
       - name: Build distributions
         run: python -m build
 
+      - name: Verify release versions
+        env:
+          RELEASE_TAG: ${{ github.event.release.tag_name }}
+        run: python tools/verify_release_version.py --tag "$RELEASE_TAG"
+
       - name: Check distribution metadata
         run: python -m twine check dist/*
 

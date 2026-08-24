@@ -46,7 +46,7 @@ jobs:
         run: uv run --locked ruff format --check .
 
       - name: Run mypy
-        run: uv run --locked mypy src/
+        run: uv run --locked mypy src/ benchmarks/ tools/
 
   tests:
     name: Test Python ${{ matrix.python-version }}

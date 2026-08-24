@@ -31,6 +31,9 @@ jobs:
       - name: Build distributions
         run: python -m build
 
+      - name: Verify distribution versions
+        run: python tools/verify_release_version.py
+
       - name: Check distribution metadata
         run: python -m twine check dist/*
 
