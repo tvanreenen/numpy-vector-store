@@ -1551,6 +1551,22 @@ class TestVectorStore:
         with pytest.raises(ValueError, match="missing fields: format_version"):
             VectorStore.open(file_path)
 
+    def test_open_rejects_unexpected_archive_fields(self, tmp_path):
+        """Test version 1 archives cannot silently extend their schema."""
+        file_path = tmp_path / "unexpected-field.npz"
+        np.savez_compressed(
+            file_path,
+            format_version=np.array(1, dtype=np.int64),
+            dimensions=np.array(2, dtype=np.int64),
+            normalize=np.array(True, dtype=np.bool_),
+            vectors=np.empty((0, 2), dtype=np.float32),
+            metadata=np.array([], dtype=object),
+            future_configuration=np.array("value"),
+        )
+
+        with pytest.raises(ValueError, match="unexpected fields: future_configuration"):
+            VectorStore.open(file_path)
+
     @pytest.mark.parametrize(
         ("archive_dimensions", "archive_normalize", "message"),
         [(3, True, "dimensions"), (2, False, "normalize")],
@@ -1609,6 +1625,7 @@ class TestVectorStore:
         [
             ("format_version", np.array([1], dtype=np.int64), "scalar integer"),
             ("dimensions", np.array(2.0), "scalar integer"),
+            ("dimensions", np.array(0, dtype=np.int64), "greater than 0"),
             ("normalize", np.array(1, dtype=np.int64), "scalar boolean"),
         ],
     )
@@ -1657,6 +1674,38 @@ class TestVectorStore:
             vectors=vectors,
             metadata=metadata,
         )
+        with pytest.raises(ValueError, match=message):
+            VectorStore.open(file_path)
+
+    @pytest.mark.parametrize(
+        ("vectors", "metadata", "message"),
+        [
+            (
+                np.empty(0, dtype=np.float32),
+                np.array([], dtype=object),
+                "2D array",
+            ),
+            (
+                np.empty((0, 2), dtype=np.float32),
+                np.empty((0, 1), dtype=object),
+                "1D array",
+            ),
+        ],
+    )
+    def test_open_rejects_malformed_archive_array_shapes(
+        self, tmp_path, vectors, metadata, message
+    ):
+        """Test versioned arrays use their documented dimensions."""
+        file_path = tmp_path / "vectors.npz"
+        np.savez_compressed(
+            file_path,
+            format_version=np.array(1, dtype=np.int64),
+            dimensions=np.array(2, dtype=np.int64),
+            normalize=np.array(True, dtype=np.bool_),
+            vectors=vectors,
+            metadata=metadata,
+        )
+
         with pytest.raises(ValueError, match=message):
             VectorStore.open(file_path)
 
