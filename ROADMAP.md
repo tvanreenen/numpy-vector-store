@@ -306,9 +306,11 @@ metadata = store.metadata
 vectors[0, 0] = 10.0       # Rejected: read-only view
 metadata[0] = replacement  # Rejected: read-only row structure
 
-vector, payload = store.get(0)
-vector[0] = 10.0           # Allowed: independent copy
-payload["reviewed"] = True  # Allowed: shared opaque metadata object
+row = store.get(0)
+if row is not None:
+    vector, payload = row
+    vector[0] = 10.0           # Allowed: independent copy
+    payload["reviewed"] = True  # Allowed: shared opaque metadata object
 ```
 
 Applications that need immutable metadata can store frozen application objects
@@ -501,12 +503,14 @@ that can silently point somewhere else as unrelated application state changes.
 
 ### Public and release contracts
 
-- Name the supported top-level public API and distinguish it from private
-  helpers, exact error wording, and implementation details.
-- Document how `VectorHit` equality and hashability inherit the behavior of its
-  opaque metadata payload.
-- Define the 1.x deprecation, removal, runtime-support, and archive-compatibility
-  policies, including the limits of old-reader and pickle portability promises.
+- The [public API and compatibility policy](COMPATIBILITY.md) names the supported
+  top-level API and distinguishes it from private helpers, exact error wording,
+  subclass hooks, submodule layout, and implementation details.
+- `VectorHit` equality and hashability inherit the behavior of its opaque
+  metadata payload rather than imposing a package-specific comparison policy.
+- The proposed 1.x policy defines deprecation, removal, runtime-support, and
+  archive-compatibility rules, including the limits of old-reader and pickle
+  portability promises.
 - Bring package license metadata and release validation up to current packaging
   practice, and require the release tag, runtime version, and built metadata to
   agree before publication.
