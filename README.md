@@ -6,7 +6,8 @@ A fast, lightweight, zero-setup in-memory vector store powered by NumPy.
 - **Fast exact vector search** using vectorized NumPy operations
 - **Simple typed API** returning `VectorHit(index, value, metadata)`
 - **Composable filtering** by passing prefiltered row indexes with `within_rows`
-- **Portable persistence** as versioned, self-describing trusted local `.npz` files
+- **Single-file persistence** as versioned, self-describing trusted local
+  `.npz` archives
 - **No framework opinions**: bring your own embeddings, chunking, async, and metadata model
 
 ## Why?
@@ -76,6 +77,12 @@ complexity checks in CI, but does not fail shared runners on wall-clock timing.
 uv add numpy-vector-store
 ```
 
+With pip:
+
+```bash
+python -m pip install numpy-vector-store
+```
+
 ## Quick Start
 
 ```python
@@ -110,6 +117,10 @@ for hit in hits:
 Each payload can be a dict, dataclass, tuple, list, string, integer row ID, or
 another Python object that fits your application. Tuple and list payloads remain
 single row values rather than being interpreted as additional array dimensions.
+
+The supported top-level package names are `VectorStore`, `VectorHit`, and
+`__version__`. See the [public API and compatibility policy](COMPATIBILITY.md)
+for the complete interface that the project intends to stabilize at 1.0.
 
 ## Scalar inputs and errors
 
@@ -170,10 +181,11 @@ payload objects stored inside it.
 `get(index)` has a narrower ownership boundary:
 
 ```python
-vector, payload = store.get(0)
-
-vector[0] = 10.0           # Independent copy; the store is unchanged.
-payload["reviewed"] = True  # Shared application metadata object.
+row = store.get(0)
+if row is not None:
+    vector, payload = row
+    vector[0] = 10.0           # Independent copy; the store is unchanged.
+    payload["reviewed"] = True  # Shared application metadata object.
 ```
 
 The returned vector is an independent `float32` copy. The metadata payload is
@@ -464,6 +476,11 @@ This project is still pre-1.0, so occasional breaking changes are expected while
 the API stabilizes. Changes are documented in the [changelog](CHANGELOG.md) and
 GitHub release notes. Deprecated APIs will keep warning for at least one point
 release before removal.
+
+Version 0.7 publishes the proposed 1.x contract for an adoption cycle before
+1.0. The [public API and compatibility policy](COMPATIBILITY.md) identifies the
+supported top-level surface, deprecation rules, archive guarantees, runtime
+support policy, and details that remain implementation-specific.
 
 Version 0.6 supports Python 3.11 through 3.14 and NumPy 1.23.2 or newer. These
 versions are listed in the package metadata and exercised in CI, including a

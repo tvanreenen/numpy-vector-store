@@ -306,9 +306,11 @@ metadata = store.metadata
 vectors[0, 0] = 10.0       # Rejected: read-only view
 metadata[0] = replacement  # Rejected: read-only row structure
 
-vector, payload = store.get(0)
-vector[0] = 10.0           # Allowed: independent copy
-payload["reviewed"] = True  # Allowed: shared opaque metadata object
+row = store.get(0)
+if row is not None:
+    vector, payload = row
+    vector[0] = 10.0           # Allowed: independent copy
+    payload["reviewed"] = True  # Allowed: shared opaque metadata object
 ```
 
 Applications that need immutable metadata can store frozen application objects
@@ -501,17 +503,25 @@ that can silently point somewhere else as unrelated application state changes.
 
 ### Public and release contracts
 
-- Name the supported top-level public API and distinguish it from private
-  helpers, exact error wording, and implementation details.
-- Document how `VectorHit` equality and hashability inherit the behavior of its
-  opaque metadata payload.
-- Define the 1.x deprecation, removal, runtime-support, and archive-compatibility
-  policies, including the limits of old-reader and pickle portability promises.
-- Bring package license metadata and release validation up to current packaging
-  practice, and require the release tag, runtime version, and built metadata to
-  agree before publication.
-- Add targeted cross-platform persistence evidence and close remaining malformed
-  archive test gaps without turning shared CI into a performance benchmark.
+- The [public API and compatibility policy](COMPATIBILITY.md) names the supported
+  top-level API and distinguishes it from private helpers, exact error wording,
+  subclass hooks, submodule layout, and implementation details.
+- `VectorHit` equality and hashability inherit the behavior of its opaque
+  metadata payload rather than imposing a package-specific comparison policy.
+- The proposed 1.x policy defines deprecation, removal, runtime-support, and
+  archive-compatibility rules, including the limits of old-reader and pickle
+  portability promises.
+- Publish the MIT license as an SPDX expression and include the license file in
+  both distribution formats. Package metadata now also identifies the project
+  as typed and in its beta adoption cycle.
+- Check that the source version, release tag, wheel metadata, and source
+  distribution metadata agree before publication. A stale tag or leftover
+  artifact therefore stops the release before it reaches PyPI.
+- Pin remote GitHub Actions to immutable commits while retaining readable
+  version comments for maintenance.
+- Run the complete test suite on Windows in addition to the supported Python
+  matrix on Linux. Archive tests cover extra fields, invalid dimensions, and
+  malformed array shapes without adding timing thresholds to shared CI.
 
 Version 0.7 does not add update, delete, document, context-manager, index,
 backend, streaming, async, builder, or metadata-query APIs. It does not split
