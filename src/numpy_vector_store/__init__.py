@@ -10,4 +10,4 @@ __author__ = "Tim VanReenen"
 
 from .vector_store import VectorHit, VectorStore
 
-__all__ = ["VectorHit", "VectorStore"]
+__all__ = ["VectorHit", "VectorStore", "__version__"]
