@@ -4,6 +4,115 @@ This changelog records user-visible changes to NumPy Vector Store. Earlier
 release notes remain available on the
 [GitHub releases page](https://github.com/tvanreenen/numpy-vector-store/releases).
 
+## 0.7.0 - 2026-08-24
+
+This release closes the remaining public contract gaps found during the 1.0
+readiness audit. It rejects two forms of lossy NumPy coercion, makes a bound
+archive path stable for the lifetime of its store, and publishes the API and
+compatibility policy intended for 1.x. It also adds release checks that enforce
+the package version and distribution metadata before publication.
+
+Valid, documented 0.6 usage continues to work. Version 0.7 does not add a new
+feature family, remove a documented API, change search ranking, add a runtime
+dependency, or change archive format version 1.
+
+### Public API and 1.x compatibility policy
+
+The supported package-level imports are now explicit:
+
+```python
+from numpy_vector_store import VectorHit, VectorStore, __version__
+```
+
+- Add a [public API and compatibility policy](COMPATIBILITY.md) that names the
+  supported `VectorStore` methods and properties, `VectorHit` fields, return
+  types, ownership behavior, exception classes, and persistence guarantees.
+- Distinguish the supported top-level interface from private helpers, submodule
+  layout, subclass hooks, exact error wording, allocation details, and internal
+  algorithms.
+- Define the 1.x semantic-versioning, deprecation, removal, Python and NumPy
+  support, and archive-compatibility policies before those promises become
+  long-term commitments in 1.0.
+- Keep `VectorHit` as an immutable result record whose equality and hashability
+  follow its three values. Opaque metadata retains its own comparison and
+  hashing behavior; a hit containing a dictionary remains unhashable.
+
+The API itself remains centered on `VectorStore`, `VectorHit`, three explicit
+metric methods, typed opaque metadata, and the create/open/save/reload
+persistence lifecycle.
+
+### Lossless numeric input handling
+
+- Reject Python row-selector sequences containing a Python or NumPy Boolean,
+  including mixed values such as `[0, True]`, before NumPy can coerce the
+  Boolean to row zero or one.
+- Preserve the vectorized validation path for native NumPy integer selectors,
+  along with the existing shape, uniqueness, and bounds rules.
+- Reject complex vector batches passed to `add()` and complex queries passed to
+  every metric method before conversion to `float32` can discard their
+  imaginary components. This includes complex dtypes whose current values have
+  a zero imaginary part.
+- Apply complex-query validation before empty-store and empty-filter shortcuts,
+  so the accepted query contract does not depend on current store state.
+
+These inputs were accepted only through implicit NumPy conversion. Calls that
+deliberately used Boolean row indexes or complex vectors now raise `TypeError`;
+real-valued integer and floating-point inputs keep their existing behavior.
+
+### Stable archive bindings
+
+- Anchor a relative path to the current working directory when `save(path)` or
+  `VectorStore.open(path)` first binds it.
+- Return that anchored absolute path from `file_path` and keep later `save()` and
+  `reload()` calls pointed at the same archive if the process changes working
+  directory.
+- Preserve extensionless `.npz` resolution and lexical path behavior. Anchoring
+  does not resolve `..` components or dereference symlinks, so ordinary
+  filesystem replacement semantics remain intact.
+- Keep Save As transactional: a new binding becomes visible only after the new
+  archive has been written successfully.
+
+Format version 1 is unchanged, and no archive conversion is required. Code that
+compares `file_path` with a relative path should compare against its anchored
+absolute form. Code that intentionally changed directories to redirect a later
+pathless save should pass the new destination explicitly to `save(path)`.
+
+### Distribution and release safeguards
+
+- Publish the MIT license as an SPDX expression and include `LICENSE` in both
+  the wheel and source distribution.
+- Declare the existing `py.typed` marker through the `Typing :: Typed`
+  classifier and identify 0.7 as the project's beta adoption cycle before 1.0.
+- Verify that the source `__version__`, GitHub release tag, wheel metadata, and
+  source-distribution metadata agree before publishing to PyPI. The verifier
+  also requires exactly one wheel and one source distribution so stale build
+  output cannot be uploaded accidentally.
+- Pin remote GitHub Actions to immutable commits while retaining readable
+  release comments beside each pin.
+- Run the complete test suite on Windows with Python 3.13 in addition to the
+  supported Python 3.11 through 3.14 matrix on Linux and the Python 3.11 minimum
+  NumPy check.
+- Add regression coverage for unexpected archive fields, nonpositive persisted
+  dimensions, malformed persisted array shapes, and platform-specific
+  filesystem exception and permission behavior.
+
+The release verifier and benchmark tools remain outside the runtime wheel and
+add no package dependency.
+
+### Runtime compatibility and upgrade notes
+
+- Continue supporting Python 3.11 through 3.14 and NumPy 1.23.2 or newer.
+- Continue reading and writing self-describing format-version-1 archives,
+  including archives created by the published 0.4 package.
+- Continue treating persistence as a trusted-file feature because opaque
+  metadata uses pickle-backed NumPy object arrays.
+- Require no data migration when upgrading from 0.6.
+
+Most applications can upgrade without code changes. Review only code that used
+Boolean row selectors, supplied complex vectors or queries, compared a bound
+`file_path` with a relative path, or relied on a later working-directory change
+to redirect a bound store.
+
 ## 0.6.0 - 2026-08-22
 
 This release makes the existing API's input and failure contracts predictable

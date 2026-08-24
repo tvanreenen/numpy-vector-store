@@ -457,7 +457,7 @@ writers can still replace one another, and the library does not promise that a
 successful save has reached durable hardware storage across every operating
 system or power failure.
 
-Version 0.6 reads only self-describing format version 1 archives. Unversioned
+Version 0.7 reads only self-describing format version 1 archives. Unversioned
 archives containing only `vectors` and `metadata` cannot be opened because they
 do not record dimensions or normalization semantics. Recreate those archives
 from source data, or convert them with NumPy Vector Store 0.4 before upgrading.
@@ -482,7 +482,7 @@ Version 0.7 publishes the proposed 1.x contract for an adoption cycle before
 supported top-level surface, deprecation rules, archive guarantees, runtime
 support policy, and details that remain implementation-specific.
 
-Version 0.6 supports Python 3.11 through 3.14 and NumPy 1.23.2 or newer. These
+Version 0.7 supports Python 3.11 through 3.14 and NumPy 1.23.2 or newer. These
 versions are listed in the package metadata and exercised in CI, including a
 dedicated check against the minimum NumPy version. Python 3.10 remains supported
 by the 0.3 release series but is not supported by 0.4 or later.
@@ -506,10 +506,11 @@ uv sync --frozen --group dev
 
 Before submitting a pull request:
 
-1. Run `uv run ruff check`
-2. Run `uv run ruff format --check`
-3. Run `uv run mypy src/`
-4. Run `uv run pytest`
+1. Run `uv lock --check`
+2. Run `uv run --locked ruff check .`
+3. Run `uv run --locked ruff format --check .`
+4. Run `uv run --locked mypy src/ benchmarks/ tools/`
+5. Run `uv run --locked pytest`
 
 ## License
 

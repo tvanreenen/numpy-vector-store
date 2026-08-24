@@ -464,7 +464,7 @@ metadata.
 
 ## 0.7.0: Final contract closure before 1.0
 
-Status: in progress
+Status: complete
 
 The 1.0 readiness audit found that the overall API, archive format, ownership
 model, search algorithms, and single-module architecture are ready to stabilize.
