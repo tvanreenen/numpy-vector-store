@@ -71,10 +71,11 @@ payload objects by reference.
 Row retrieval deliberately treats vectors and metadata differently:
 
 ```python
-vector, payload = store.get(0)
-
-vector[0] = 10.0           # Independent copy; the store is unchanged.
-payload["reviewed"] = True  # Shared application metadata object.
+row = store.get(0)
+if row is not None:
+    vector, payload = row
+    vector[0] = 10.0           # Independent copy; the store is unchanged.
+    payload["reviewed"] = True  # Shared application metadata object.
 ```
 
 Vectors have one uniform NumPy representation, so copying a single row gives
