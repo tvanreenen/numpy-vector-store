@@ -511,11 +511,17 @@ that can silently point somewhere else as unrelated application state changes.
 - The proposed 1.x policy defines deprecation, removal, runtime-support, and
   archive-compatibility rules, including the limits of old-reader and pickle
   portability promises.
-- Bring package license metadata and release validation up to current packaging
-  practice, and require the release tag, runtime version, and built metadata to
-  agree before publication.
-- Add targeted cross-platform persistence evidence and close remaining malformed
-  archive test gaps without turning shared CI into a performance benchmark.
+- Publish the MIT license as an SPDX expression and include the license file in
+  both distribution formats. Package metadata now also identifies the project
+  as typed and in its beta adoption cycle.
+- Check that the source version, release tag, wheel metadata, and source
+  distribution metadata agree before publication. A stale tag or leftover
+  artifact therefore stops the release before it reaches PyPI.
+- Pin remote GitHub Actions to immutable commits while retaining readable
+  version comments for maintenance.
+- Run the complete test suite on Windows in addition to the supported Python
+  matrix on Linux. Archive tests cover extra fields, invalid dimensions, and
+  malformed array shapes without adding timing thresholds to shared CI.
 
 Version 0.7 does not add update, delete, document, context-manager, index,
 backend, streaming, async, builder, or metadata-query APIs. It does not split
