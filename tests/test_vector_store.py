@@ -1282,7 +1282,7 @@ class TestVectorStore:
         store = VectorStore(dimensions=2)
         store.save(original_path)
 
-        with pytest.raises(IsADirectoryError):
+        with pytest.raises(OSError):
             store.save(invalid_path)
 
         assert store.file_path == original_path
@@ -1395,6 +1395,8 @@ class TestVectorStore:
         store = VectorStore(dimensions=2)
         store.save(file_path)
         file_path.chmod(0o640)
+        if stat.S_IMODE(file_path.stat().st_mode) != 0o640:
+            pytest.skip("filesystem does not preserve POSIX permission bits")
         store.add([[1.0, 0.0]], [{"id": "updated"}])
 
         store.save()
