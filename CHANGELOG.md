@@ -2,7 +2,7 @@
 
 This changelog records user-visible changes to NumPy Vector Store. Earlier
 release notes remain available on the
-[GitHub releases page](https://github.com/tvanreenen/numpy-vector-store/releases).
+[GitHub releases page](https://github.com/tvr-works/numpy-vector-store/releases).
 
 ## 0.7.0 - 2026-08-24
 

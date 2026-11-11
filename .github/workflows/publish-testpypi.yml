@@ -20,6 +20,9 @@ jobs:
     needs: validate
     runs-on: ubuntu-latest
     timeout-minutes: 10
+    environment:
+      name: testpypi
+      url: https://test.pypi.org/p/numpy-vector-store
     permissions:
       id-token: write
 
