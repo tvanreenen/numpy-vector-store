@@ -512,6 +512,8 @@ Before submitting a pull request:
 4. Run `uv run --locked mypy src/ benchmarks/ tools/`
 5. Run `uv run --locked pytest`
 
+Maintainers should also read the [release and repository transfer runbook](RELEASING.md) before preparing a release or changing publication infrastructure.
+
 ## License
 
 MIT License - see [LICENSE](LICENSE) file for details.

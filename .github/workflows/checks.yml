@@ -2,6 +2,16 @@ name: Checks
 
 on:
   workflow_call:
+    inputs:
+      release-tag:
+        description: Optional v-prefixed tag that must match the distributions
+        required: false
+        type: string
+        default: ""
+    outputs:
+      distributions-artifact-id:
+        description: Artifact ID for the verified wheel and source distribution
+        value: ${{ jobs.distributions.outputs.artifact-id }}
   pull_request:
   push:
     branches:
@@ -18,21 +28,24 @@ permissions:
 jobs:
   quality:
     name: Lint, format, and type-check
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
 
     steps:
       - name: Check out repository
-        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
 
       - name: Set up Python
-        uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6.3.0
+        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
         with:
           python-version: "3.13"
 
       - name: Set up uv
-        uses: astral-sh/setup-uv@08807647e7069bb48b6ef5acd8ec9567f424441b # v8.1.0
+        uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2 # v10.3.3
         with:
-          version: "0.11.32"
+          version: "0.13.7"
           python-version: "3.13"
           enable-cache: true
 
@@ -50,7 +63,8 @@ jobs:
 
   tests:
     name: Test Python ${{ matrix.python-version }}
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
     strategy:
       fail-fast: false
       matrix:
@@ -62,17 +76,19 @@ jobs:
 
     steps:
       - name: Check out repository
-        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
 
       - name: Set up Python
-        uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6.3.0
+        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
         with:
           python-version: ${{ matrix.python-version }}
 
       - name: Set up uv
-        uses: astral-sh/setup-uv@08807647e7069bb48b6ef5acd8ec9567f424441b # v8.1.0
+        uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2 # v10.3.3
         with:
-          version: "0.11.32"
+          version: "0.13.7"
           python-version: ${{ matrix.python-version }}
           enable-cache: true
 
@@ -85,20 +101,23 @@ jobs:
   windows:
     name: Test Windows on Python 3.13
     runs-on: windows-latest
+    timeout-minutes: 15
 
     steps:
       - name: Check out repository
-        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
 
       - name: Set up Python
-        uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6.3.0
+        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
         with:
           python-version: "3.13"
 
       - name: Set up uv
-        uses: astral-sh/setup-uv@08807647e7069bb48b6ef5acd8ec9567f424441b # v8.1.0
+        uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2 # v10.3.3
         with:
-          version: "0.11.32"
+          version: "0.13.7"
           python-version: "3.13"
           enable-cache: true
 
@@ -110,21 +129,24 @@ jobs:
 
   minimum-numpy:
     name: Test minimum NumPy on Python 3.11
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
 
     steps:
       - name: Check out repository
-        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
 
       - name: Set up Python
-        uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6.3.0
+        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
         with:
           python-version: "3.11"
 
       - name: Set up uv
-        uses: astral-sh/setup-uv@08807647e7069bb48b6ef5acd8ec9567f424441b # v8.1.0
+        uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2 # v10.3.3
         with:
-          version: "0.11.32"
+          version: "0.13.7"
           python-version: "3.11"
           enable-cache: true
 
@@ -138,3 +160,74 @@ jobs:
           --with numpy==1.23.2
           --with pytest==8.4.2
           python -m pytest
+
+  distributions:
+    name: Build and test distributions
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    outputs:
+      artifact-id: ${{ steps.upload.outputs.artifact-id }}
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Set up Python
+        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: "3.11"
+
+      - name: Set up uv
+        uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2 # v10.3.3
+        with:
+          version: "0.13.7"
+          python-version: "3.11"
+          enable-cache: true
+
+      - name: Build wheel and source distribution
+        run: uv build --out-dir dist
+
+      - name: Verify release versions
+        env:
+          RELEASE_TAG: ${{ inputs.release-tag }}
+        run: |
+          if [[ -n "$RELEASE_TAG" ]]; then
+            uv run --locked python tools/verify_release_version.py --tag "$RELEASE_TAG"
+          else
+            uv run --locked python tools/verify_release_version.py
+          fi
+
+      - name: Check distribution metadata
+        run: uvx --from twine==7.0.0 twine check --strict dist/*
+
+      - name: Test installed wheel
+        run: >-
+          uv run
+          --isolated
+          --no-project
+          --python 3.11
+          --with ./dist/*.whl
+          python tools/verify_installed_distribution.py
+
+      - name: Test installed source distribution
+        run: >-
+          uv run
+          --isolated
+          --no-project
+          --python 3.11
+          --with ./dist/*.tar.gz
+          python tools/verify_installed_distribution.py
+
+      - name: Upload verified distributions
+        id: upload
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: python-package-distributions-${{ github.run_id }}-${{ github.run_attempt }}
+          path: |
+            dist/*.whl
+            dist/*.tar.gz
+          if-no-files-found: error
+          retention-days: 7
+          compression-level: 0
