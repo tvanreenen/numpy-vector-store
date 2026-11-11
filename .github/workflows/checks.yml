@@ -28,7 +28,7 @@ permissions:
 jobs:
   quality:
     name: Lint, format, and type-check
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 10
 
     steps:
@@ -63,7 +63,7 @@ jobs:
 
   tests:
     name: Test Python ${{ matrix.python-version }}
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 15
     strategy:
       fail-fast: false
@@ -129,7 +129,7 @@ jobs:
 
   minimum-numpy:
     name: Test minimum NumPy on Python 3.11
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 15
 
     steps:
@@ -163,7 +163,7 @@ jobs:
 
   distributions:
     name: Build and test distributions
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 15
     outputs:
       artifact-id: ${{ steps.upload.outputs.artifact-id }}

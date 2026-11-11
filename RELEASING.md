@@ -117,7 +117,7 @@ Do not remove a working publisher record before its replacement has completed a 
 
 The personal repository remains on GitHub-hosted runners because it has no confirmed Blacksmith runner access. After transfer, first run a harmless organization-level probe that proves the expected label is available to this repository.
 
-Once verified, change eligible Linux validation and distribution-build jobs from `ubuntu-latest` to the established `tvr-works` label `blacksmith-4vcpu-ubuntu-2404`. Keep Windows coverage on `windows-latest`. Keep the small OIDC publishing jobs on `ubuntu-latest`; they only download and upload artifacts, so moving them would add an external runner to the credential-bearing boundary without a useful performance benefit.
+Once verified, change eligible Linux validation and distribution-build jobs from `ubuntu-24.04` to the established `tvr-works` label `blacksmith-4vcpu-ubuntu-2404`. Keep Windows coverage on `windows-latest`. Keep the small OIDC publishing jobs on `ubuntu-latest`; they only download and upload artifacts, so moving them would add an external runner to the credential-bearing boundary without a useful performance benefit.
 
 Change runner labels in their own pull request. The build commands and checks should remain the same so any behavior or timing difference can be attributed to runner infrastructure.
 
