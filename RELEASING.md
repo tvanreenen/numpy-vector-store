@@ -1,6 +1,6 @@
 # Releasing and repository transfer
 
-This document explains how NumPy Vector Store validates and publishes distributions, then records the staged plan for moving maintenance from `tvanreenen` to `tvr-works`. The transfer steps are a runbook, not a record that the external changes have already happened.
+This document explains how NumPy Vector Store validates and publishes distributions, and records the ownership and trust boundaries maintainers must preserve.
 
 ## Release trust model
 
@@ -53,82 +53,38 @@ The release workflow requires the source version, wheel metadata, source-distrib
 
 TestPyPI publication is a separate manual workflow. It builds and validates the selected commit through the same `Checks` workflow, but it has no release tag to compare. Use it for an end-to-end publishing probe when the selected version is not already present on TestPyPI.
 
-## Why environments are deferred
+## Ownership and publishing environments
 
-Protected GitHub environments can require reviewer approval, restrict deployment branches or tags, and bind PyPI trust to a more specific identity. They are the intended final state for `testpypi` and `pypi`.
+The canonical repository is `tvr-works/numpy-vector-store`. The PyPI and TestPyPI projects remain owned by the individual `tvanreenen` account. GitHub organization ownership and Python package index ownership are independent; a PyPI organization, shared account, or additional human owner is not required for this project's solo-maintainer model.
 
-They are not added in the initial CI hardening change. The current workflows do not name environments, and repository inspection cannot confirm the authenticated publisher records stored on PyPI or TestPyPI. Adding `environment: pypi` only in GitHub would change the OIDC claim and could make the next release fail. The environment name must be configured on both sides as one staged change. See [GitHub deployment environments](https://docs.github.com/en/actions/reference/workflows-and-actions/deployments-and-environments) and [PyPI Trusted Publisher configuration](https://docs.pypi.org/trusted-publishers/adding-a-publisher/).
+Both indexes trust the GitHub organization repository through environment-bound publishers:
 
-## Transfer to `tvr-works`
+| Index | Workflow | Environment | Allowed ref |
+|---|---|---|---|
+| TestPyPI | `publish-testpypi.yml` | `testpypi` | `main` branch |
+| PyPI | `publish-pypi.yml` | `pypi` | tags matching `v*` |
 
-The GitHub and PyPI transfers are related operationally, but they are separate ownership systems. Moving the GitHub repository does not move the PyPI project, and placing the PyPI project in an organization does not rename `numpy-vector-store`, change imports, or create a package namespace. PyPI organization accounts do not provide namespaces.
+The environments contain no publishing token or other secret. PyPI exchanges the workflow's GitHub OIDC identity for a short-lived upload token. The environment name is part of that identity and must match the corresponding Trusted Publisher exactly. See [GitHub deployment environments](https://docs.github.com/en/actions/reference/workflows-and-actions/deployments-and-environments) and [PyPI Trusted Publisher configuration](https://docs.pypi.org/trusted-publishers/adding-a-publisher/).
 
-### 1. Recheck the baseline
+The environments intentionally have no required reviewer and do not prevent self-review. Requiring another approver would deadlock the current solo maintainer. Their branch and tag policies still prevent an upload job from using an unintended ref.
 
-Immediately before the transfer, record the default branch, tags, open pull requests and issues, releases, Actions variables and secrets, environments, rulesets, branch protections, deploy keys, webhooks, installed apps, and current Trusted Publisher records on both PyPI services. This repository had no GitHub environments, Actions secrets or variables, self-hosted runners, branch protections, or rulesets when this runbook was written, but that evidence can become stale.
+Do not remove or replace a working publisher record until its replacement has completed an authorized upload. TestPyPI can qualify configuration with an otherwise legitimate unused package version. Production configuration is qualified only by a planned semantic release; never create, delete, replace, or republish a production release solely to probe OIDC configuration.
 
-Confirm that `tvr-works/numpy-vector-store` is available, the organization permits the transfer, the maintainer has permission to create repositories there, and the required teams and outside collaborators are known. Do not rely on redirected URLs for automation or security identities.
+## Runner boundary
 
-### 2. Prepare PyPI organization ownership
+Linux validation and distribution construction use the organization-managed `blacksmith-4vcpu-ubuntu-2404` runner. Windows coverage remains on `windows-latest`. The small OIDC publishing jobs remain on GitHub-hosted `ubuntu-latest`; they only download and upload verified artifacts, so the external build runner never receives the short-lived publishing credential.
 
-Create or obtain approval for the appropriate PyPI organization account and define its owner and maintainer teams. PyPI community organizations may qualify for free service; corporate organizations are billed per active member. Review the current [organization pricing](https://docs.pypi.org/organization-accounts/pricing-and-payments/) before registration.
+If Blacksmith availability changes, move the validation and build jobs back to an explicit GitHub-hosted Ubuntu image in a reviewed pull request. Do not move the OIDC upload jobs to a third-party runner.
 
-An existing project owner can transfer `numpy-vector-store` from the individual account to the organization without changing its project name, release history, install command, or import path. Follow PyPI's [project transfer procedure](https://docs.pypi.org/organization-accounts/actions/project-actions/) and keep at least two trusted human owners during the transition.
+## Repository transfer record
 
-This PyPI ownership move can be completed before the GitHub transfer because it does not change the GitHub OIDC claim. Confirm team permissions and the existing publisher record after the project move.
-
-### 3. Transfer the GitHub repository
-
-Transfer the repository through GitHub's documented ownership flow, preserving its name and full Git history. GitHub redirects old repository web and Git URLs after a transfer, but update active clones and integrations to the new URL instead of treating the redirect as permanent configuration. Follow the [GitHub repository transfer documentation](https://docs.github.com/en/repositories/creating-and-managing-repositories/transferring-a-repository).
-
-After the transfer, verify the default branch, tags, releases, issues, pull requests, Actions history, collaborator access, organization policy, and workflow permissions before merging new work. Run the nonpublishing `Checks` workflow on `tvr-works/numpy-vector-store` and resolve organization-policy or runner failures before attempting a package upload.
-
-### 4. Rebind Trusted Publishers
-
-OIDC does not follow GitHub's repository redirect. Update the Trusted Publisher records on both PyPI and TestPyPI so their owner is `tvr-works`, their repository is `numpy-vector-store`, and their workflow filenames remain `publish-pypi.yml` and `publish-testpypi.yml`.
-
-Do this after the GitHub transfer and before the next upload. Confirm each field exactly; owner, repository, workflow filename, and environment matching is case-sensitive and exact. Keep the first post-transfer publisher records without an environment if that matches the current working records. This restores the existing trust shape with only the required owner change.
-
-### 5. Update repository references
-
-In a normal reviewed pull request, replace maintained `github.com/tvanreenen/numpy-vector-store` links with `github.com/tvr-works/numpy-vector-store`. At minimum, inspect `pyproject.toml`, the README clone command, changelog and release links, badges, funding configuration, and external service settings. Do not rewrite historical Git commits or rename the package.
-
-Update local remotes explicitly:
+The existing repository was transferred from `tvanreenen/numpy-vector-store` to `tvr-works/numpy-vector-store`; it was not copied or recreated. The transfer preserved repository identity and history, while GitHub redirects the old web and Git URLs. Active clones and maintained metadata should use the canonical URL directly:
 
 ```bash
 git remote set-url origin https://github.com/tvr-works/numpy-vector-store.git
 git remote -v
 ```
 
-### 6. Add protected publishing environments
+Do not recreate the old owner/name combination or depend on its redirect for automation and OIDC identity. PyPI Trusted Publishers must name `tvr-works` directly because OIDC owner identity does not follow redirects.
 
-Make the environment migration after the transferred repository can run `Checks` and after its owner-only Trusted Publisher records are confirmed.
-
-1. Create `testpypi` and `pypi` environments in GitHub.
-2. Restrict their deployment branches or tags and configure required reviewers. For production, prevent self-review when the available maintainer model supports it.
-3. Add new Trusted Publisher records on TestPyPI and PyPI with the matching environment names. Keep the working no-environment records during the transition.
-4. Update the corresponding workflow jobs to declare `environment: testpypi` and `environment: pypi`.
-5. Validate the complete path on TestPyPI first.
-6. Use the protected production environment for the next planned release, verify the upload, then remove superseded no-environment publisher records.
-
-Do not remove a working publisher record before its replacement has completed a real upload. Do not use a production release solely as a configuration probe.
-
-### 7. Adopt `tvr-works` runners
-
-The personal repository remains on GitHub-hosted runners because it has no confirmed Blacksmith runner access. After transfer, first run a harmless organization-level probe that proves the expected label is available to this repository.
-
-Once verified, change eligible Linux validation and distribution-build jobs from `ubuntu-24.04` to the established `tvr-works` label `blacksmith-4vcpu-ubuntu-2404`. Keep Windows coverage on `windows-latest`. Keep the small OIDC publishing jobs on `ubuntu-latest`; they only download and upload artifacts, so moving them would add an external runner to the credential-bearing boundary without a useful performance benefit.
-
-Change runner labels in their own pull request. The build commands and checks should remain the same so any behavior or timing difference can be attributed to runner infrastructure.
-
-## Transfer completion criteria
-
-The transfer is complete when all of the following are true:
-
-- the canonical GitHub repository is `tvr-works/numpy-vector-store` and normal checks pass there;
-- the existing PyPI project remains named `numpy-vector-store`, with its release history intact and team ownership confirmed;
-- PyPI and TestPyPI Trusted Publisher records match the transferred repository and top-level workflows;
-- protected `testpypi` and `pypi` environments have completed their staged validation;
-- maintained repository links and integrations use the new GitHub owner;
-- eligible Linux jobs pass on the verified organization runner, while Windows and OIDC upload jobs retain their intended runners;
-- obsolete publisher records and temporary transfer access have been removed only after their replacements are proven.
+When auditing the migration, verify the repository ID, default branch, tags, GitHub releases and assets, pull requests, visibility, maintainer access, workflow permissions, environments, publisher records, and a green `main` run under the organization owner. Do not rewrite Git history or rename the Python distribution or import package.

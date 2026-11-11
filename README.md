@@ -499,7 +499,7 @@ contracts. Persistence users upgrading from the 0.3 API should also read the
 ## Contributing
 
 ```bash
-git clone https://github.com/tvanreenen/numpy-vector-store.git
+git clone https://github.com/tvr-works/numpy-vector-store.git
 cd numpy-vector-store
 uv sync --frozen --group dev
 ```
