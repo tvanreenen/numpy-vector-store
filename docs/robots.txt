@@ -1,0 +1,3 @@
+User-agent: *
+Allow: /
+Sitemap: https://numpy-vector-store.tvr.works/sitemap.xml

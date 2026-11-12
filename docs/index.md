@@ -9,46 +9,34 @@ description: Exact, in-process vector search powered by NumPy. Get started with 
 
 <p class="intro">Exact, in-process vector search powered by NumPy.</p>
 
-Keep embeddings and metadata in your Python process. Search by cosine similarity,
-dot product, or Euclidean distance, then save a trusted local archive when you
-need it. Bring your own embedding model and application data.
+Keep embeddings and metadata in your Python process. Bring your own model;
+search by cosine similarity, dot product, or Euclidean distance.
 
-NumPy Vector Store fits small-to-medium collections that can stay in memory.
-Every search scores every selected row; there is no approximate index or
-background service.
+Made for small-to-medium collections in memory. Every search scores every
+selected row, with no approximate index or background service.
 
 ## Install
 
-```sh
-uv add numpy-vector-store
-```
+=== "uv"
 
-Using pip:
+    ```sh
+    uv add numpy-vector-store
+    ```
 
-```sh
-python -m pip install numpy-vector-store
-```
+=== "pip"
 
-Requires **Python 3.11 or newer** and **NumPy 1.23.2 or newer**.
-Python 3.11–3.14 are tested. These docs describe the published **0.7.0** API.
+    ```sh
+    python -m pip install numpy-vector-store
+    ```
+
+**Python 3.11+** · **NumPy 1.23.2+** · [Installation details](getting-started.md)
 
 ## Your first search
 
 Use small vectors to see the complete workflow. Replace them with embeddings
 from your model when you integrate the library.
 
-```python
-from numpy_vector_store import VectorStore
-
-store = VectorStore[str](dimensions=3)
-store.add(
-    [[1.0, 0.0, 0.0], [0.0, 1.0, 0.0], [0.0, 0.0, 1.0]],
-    ["x-axis", "y-axis", "z-axis"],
-)
-
-for hit in store.cosine_search([0.9, 0.1, 0.0], top_k=2):
-    print(f"{hit.metadata}: {hit.value:.3f}")
-```
+--8<-- "README.md:quickstart"
 
 ```text
 x-axis: 0.994
@@ -61,7 +49,14 @@ default. Choose `normalize=False` when magnitude matters.
 
 ## Keep going
 
-Read the [API reference](reference.md) for supported methods and signatures.
+| Task | Where to go |
+| --- | --- |
+| Work with embeddings and typed metadata | [Getting started](getting-started.md) |
+| Choose a metric or restrict the candidate rows | [Search and filtering](search.md) |
+| Save, open, or refresh a local archive | [Persistence](persistence.md) |
+| Look up a signature | [API reference](reference.md) |
+| Size a collection for your workload | [Performance and practical limits](performance.md) |
 
 The package is pre-1.0. Version 0.7 publishes the contract intended for 1.0;
-it does not yet make a 1.x stability commitment.
+it does not yet make a 1.x stability commitment. Read the
+[compatibility policy](COMPATIBILITY.md) before adopting it.

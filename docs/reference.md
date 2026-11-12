@@ -15,11 +15,17 @@ These signatures and docstrings are rendered from the package source. Only the
 supported public members are included. `TMetadata` is your application payload
 type; `ArrayLike` refers to NumPy-compatible array input.
 
-## VectorStore
+The source aliases `_PathInput` and `_RealScalar` appear in signatures.
+`_PathInput` means `str | os.PathLike[str]`. `_RealScalar` means a Python or
+NumPy integer or floating scalar; booleans are rejected. They describe accepted
+inputs and are not additional supported package exports.
+
+Read [search and filtering](search.md), [persistence](persistence.md), and
+[state and threading](ownership.md) for the behavior behind these signatures.
 
 ::: numpy_vector_store.VectorStore
     options:
-      heading_level: 3
+      heading_level: 2
       merge_init_into_class: true
       members:
         - __init__
@@ -39,11 +45,9 @@ type; `ArrayLike` refers to NumPy-compatible array input.
         - clear
         - __len__
 
-## VectorHit
-
 ::: numpy_vector_store.VectorHit
     options:
-      heading_level: 3
+      heading_level: 2
       members: [index, value, metadata]
 
 A frozen result record. Fields cannot be reassigned, but a mutable metadata

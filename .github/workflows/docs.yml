@@ -1,0 +1,55 @@
+name: Documentation
+
+on:
+  pull_request:
+  push:
+    branches:
+      - "**"
+  workflow_dispatch:
+
+concurrency:
+  group: docs-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  documentation:
+    name: Build and verify documentation
+    runs-on: blacksmith-4vcpu-ubuntu-2404
+    timeout-minutes: 10
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Set up Python
+        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: "3.13"
+
+      - name: Set up uv
+        uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2 # v10.3.3
+        with:
+          version: "0.13.7"
+          python-version: "3.13"
+          enable-cache: true
+
+      - name: Install documentation tools
+        run: uv sync --locked --no-default-groups --group docs
+
+      - name: Test documentation tooling
+        run: uv run --locked --no-default-groups --group docs python tools/docs_tests.py
+
+      - name: Build, validate links, and execute rendered examples
+        run: uv run --locked --no-default-groups --group docs python tools/docs.py check
+
+      - name: Keep the verified static site for review
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: documentation-${{ github.sha }}
+          path: site/
+          if-no-files-found: error
+          retention-days: 7

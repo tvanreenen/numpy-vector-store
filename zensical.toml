@@ -9,15 +9,33 @@ repo_name = "tvr-works/numpy-vector-store"
 docs_dir = "docs"
 site_dir = "site"
 strict = true
+exclude_docs = "/overrides/"
 dev_addr = "127.0.0.1:8000"
 extra_css = ["assets/stylesheets/extra.css"]
 nav = [
   { "Start here" = "index.md" },
+  { "Guide" = [
+    { "Getting started" = "getting-started.md" },
+    { "Search and filtering" = "search.md" },
+    { "Persistence" = "persistence.md" },
+    { "State and threading" = "ownership.md" },
+  ] },
   { "API reference" = "reference.md" },
+  { "Performance" = [
+    { "Practical limits" = "performance.md" },
+    { "Run benchmarks" = "benchmarks/README.md" },
+  ] },
+  { "Releases" = [
+    { "Compatibility policy" = "COMPATIBILITY.md" },
+    { "Migration guide" = "MIGRATION.md" },
+    { "Changelog" = "CHANGELOG.md" },
+  ] },
 ]
 
 [project.extra]
 docs_version = "0.7.0"
+docs_status = "released"
+api_source_sha256 = "9a6c00beaaac0e90627571216f7bd91896f32d0c9dbad5f8bad8e3bfef8a90b9"
 
 [project.theme]
 variant = "modern"
@@ -25,6 +43,7 @@ language = "en"
 font = false
 logo = "assets/logo.svg"
 favicon = "assets/logo.svg"
+custom_dir = "docs/overrides"
 features = [
   "content.code.copy",
   "navigation.expand",
@@ -64,6 +83,7 @@ toc.permalink = true
 pymdownx.details = {}
 pymdownx.highlight.pygments_lang_class = true
 pymdownx.superfences = {}
+pymdownx.tabbed.alternate_style = true
 pymdownx.snippets.base_path = ["."]
 pymdownx.snippets.check_paths = true
 
