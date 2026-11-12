@@ -1,6 +1,6 @@
 [project]
 site_name = "NumPy Vector Store"
-site_url = "https://numpy-vector-store.tvr.works/"
+site_url = "https://nvs.tvr.works/"
 site_description = "Exact, in-process vector search powered by NumPy. Install, search, filter, and persist with a small typed Python API."
 site_author = "Tim VanReenen"
 copyright = 'An open source project by <a href="https://tvr.works">TVR Works</a> · MIT licensed'

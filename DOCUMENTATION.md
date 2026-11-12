@@ -113,10 +113,9 @@ dependency or flaky browser step in package CI.
 ## Later Cloudflare Pages publication
 
 No hosting project, DNS record, GitHub secret, package publisher, or account
-setting is created by this work. The proposed canonical URL is provisional:
-`https://numpy-vector-store.tvr.works/`. Confirm it before publication. If it
-changes, update `site_url` in `zensical.toml` and the sitemap URL in
-`docs/robots.txt`, then rerun the checks.
+setting is created by the local build. The selected canonical URL is
+`https://nvs.tvr.works/`. If it changes, update `site_url` in `zensical.toml`
+and the sitemap URL in `docs/robots.txt`, then rerun the checks.
 
 When publication is authorized, connect Cloudflare Pages to the existing public
 `tvr-works/numpy-vector-store` repository through the Cloudflare GitHub app.
