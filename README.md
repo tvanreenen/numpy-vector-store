@@ -1,6 +1,6 @@
 # NumPy Vector Store
 
-[Documentation](https://nvs.tvr.works/) · [API reference](https://nvs.tvr.works/reference/)
+[Documentation](https://vectors.tvr.works/) · [API reference](https://vectors.tvr.works/reference/)
 
 A fast, lightweight, zero-setup in-memory vector store powered by NumPy.
 
