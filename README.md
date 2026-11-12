@@ -1,5 +1,7 @@
 # NumPy Vector Store
 
+[Documentation](https://nvs.tvr.works/) · [API reference](https://nvs.tvr.works/reference/)
+
 A fast, lightweight, zero-setup in-memory vector store powered by NumPy.
 
 - **Tiny local vector search** for projects that do not need a vector database
@@ -18,6 +20,8 @@ network services, indexing infrastructure, ingestion pipelines, or domain-specif
 metadata filtering.
 
 ## Performance
+
+<!-- --8<-- [start:performance] -->
 
 `VectorStore` performs exact search over every selected row. The following
 measurements are reference points, not latency guarantees:
@@ -71,6 +75,8 @@ See [the benchmark guide](benchmarks/README.md) for the timed regions, complete
 options, output fields, and interpretation notes. The project keeps structural
 complexity checks in CI, but does not fail shared runners on wall-clock timing.
 
+<!-- --8<-- [end:performance] -->
+
 ## Installation
 
 ```bash
@@ -85,33 +91,22 @@ python -m pip install numpy-vector-store
 
 ## Quick Start
 
+<!-- --8<-- [start:quickstart] -->
+
 ```python
-import numpy as np
 from numpy_vector_store import VectorStore
 
-store = VectorStore[dict[str, str]](dimensions=3)
-
+store = VectorStore[str](dimensions=3)
 store.add(
-    vectors=np.array([
-        [1.0, 0.0, 0.0],
-        [0.0, 1.0, 0.0],
-        [0.0, 0.0, 1.0],
-    ]),
-    metadata=[
-        {"title": "x-axis"},
-        {"title": "y-axis"},
-        {"title": "z-axis"},
-    ],
+    [[1.0, 0.0, 0.0], [0.0, 1.0, 0.0], [0.0, 0.0, 1.0]],
+    ["x-axis", "y-axis", "z-axis"],
 )
 
-hits = store.cosine_search(
-    query=np.array([0.9, 0.1, 0.0]),
-    top_k=2,
-)
-
-for hit in hits:
-    print(f"{hit.metadata['title']}: {hit.value:.3f}")
+for hit in store.cosine_search([0.9, 0.1, 0.0], top_k=2):
+    print(f"{hit.metadata}: {hit.value:.3f}")
 ```
+
+<!-- --8<-- [end:quickstart] -->
 
 `metadata` is an outer sequence with one opaque payload for each vector row.
 Each payload can be a dict, dataclass, tuple, list, string, integer row ID, or
@@ -122,353 +117,59 @@ The supported top-level package names are `VectorStore`, `VectorHit`, and
 `__version__`. See the [public API and compatibility policy](COMPATIBILITY.md)
 for the complete interface that the project intends to stabilize at 1.0.
 
-## Scalar inputs and errors
+## Search and persistence
 
-`dimensions`, `top_k`, and the index passed to `get()` use integer semantics.
-Python integers and NumPy integer scalars are accepted and converted to Python
-`int`; booleans are rejected rather than being treated as zero or one.
-`dimensions` and `top_k` must be greater than zero. A valid integer outside the
-stored row range still makes `get()` return `None`.
+Search by direction with `cosine_search`, by dot product with `dot_search`, or
+by distance with `euclidean_search`. All searches score every selected row.
+Cosine and dot results rank larger values first; Euclidean results rank smaller
+distances first. Exact computed-value ties use the lower original row index,
+including at the `top_k` boundary.
 
-`normalize` accepts Python and NumPy booleans and is stored as a Python `bool`.
-Search thresholds such as `min_value` and `max_value` accept finite Python
-integer or floating-point values and NumPy integer or floating scalars.
-Booleans, strings, complex numbers, and arrays are not threshold scalars and are
-rejected.
+The default `normalize=True` stores unit vectors and normalizes queries.
+Choose `normalize=False` for magnitude-sensitive dot products or raw Euclidean
+geometry. Vectors use `float32` and must remain finite after conversion.
+Complex values are rejected. Normalized stores and cosine queries reject zero
+vectors.
 
-`within_rows` must be a one-dimensional sequence of unique integer row indexes.
-Python and NumPy integers are accepted; booleans and non-integer values are not.
-When supplied as a Python sequence, this includes a boolean mixed into otherwise
-integer values; NumPy's implicit conversion of that boolean to zero or one is
-not used as a row index.
-Malformed shapes and duplicate indexes raise `ValueError`, while an index
-outside the current store raises `IndexError`. These checks still run when the
-store is empty.
-
-For these scalar inputs, an inappropriate type raises `TypeError` and a
-supported type with an invalid value raises `ValueError`. Row selectors outside
-the store raise `IndexError`, and filesystem operations continue to raise the
-relevant `OSError` subclass. Error messages explain the failed argument, but
-their exact wording is not a compatibility guarantee.
-
-## State ownership
-
-The store owns its configuration and row structure. `dimensions`, `normalize`,
-and `file_path` are readable properties, but callers cannot assign them
-directly. Use the constructor for configuration, `open(path)` to open an
-archive, and `save(path)` to establish or change a binding.
-
-`store.vectors` and `store.metadata` are zero-copy, non-writeable NumPy views
-for inspection and metadata prefiltering. Direct item assignment and ordinary
-attempts to enable writes are rejected. Request a fresh view after `add()`,
-`clear()`, or `reload()` when current rows are required.
-
-These views prevent accidental mutation through the supported API; they are not
-tamper-proof snapshots. NumPy exposes shared buffers, and Python private state
-can be reached deliberately. Mutating backing storage through `.base`, private
-attributes, `ctypes`, or similar escape hatches is unsupported and can corrupt
-store invariants. Use `.copy()` when code needs an independently mutable
-full-array snapshot:
+Filter metadata in your application, then pass unique integer row indexes as
+`within_rows`. Unfiltered search uses the stored matrix directly; filtered
+search gathers a temporary matrix. There is no metadata query language.
 
 ```python
-vectors = store.vectors.copy()
-metadata_rows = store.metadata.copy()
+rows = [i for i, payload in enumerate(store.metadata) if payload.startswith("x")]
+hits = store.cosine_search([1.0, 0.0, 0.0], within_rows=rows)
+
+store.save("vectors.npz")       # Write and bind a destination.
+store.save()                    # Update the bound archive.
+loaded = VectorStore[str].open("vectors.npz")
+loaded.reload()                 # Discard memory and reread the archive.
 ```
 
-Copying `metadata` isolates the outer row array but still shares the opaque
-payload objects stored inside it.
-
-`get(index)` has a narrower ownership boundary:
-
-```python
-row = store.get(0)
-if row is not None:
-    vector, payload = row
-    vector[0] = 10.0           # Independent copy; the store is unchanged.
-    payload["reviewed"] = True  # Shared application metadata object.
-```
-
-The returned vector is an independent `float32` copy. The metadata payload is
-the same opaque object supplied to `add()` or restored from the archive; the
-store protects the metadata row structure but does not deep-copy arbitrary
-dicts, lists, dataclasses, or application objects. Applications that require
-immutable payloads can use frozen objects or copy them at their own boundary.
-
-## Repeated additions
-
-`add()` accepts one row or a batch, and preserves insertion order in either
-case. The store keeps private spare capacity so repeated small additions do not
-copy every existing row on every call. When that capacity is full, the vector
-and metadata arrays grow together and the active rows are copied once.
-
-Spare capacity is internal. `len(store)`, inspection views, search, `get()`, and
-saved archives contain only rows that were added. `clear()` releases both the
-active rows and any reserved capacity held by the store. As with any NumPy
-view, an older inspection view keeps its previous buffer alive until that view
-is released. Adding a batch is still preferable when the application already
-has one because it also reduces per-call validation and Python overhead.
-
-## Normalization
-
-`VectorStore` defaults to `normalize=True`, which scales each stored vector to
-length `1`. Normalization preserves vector direction while discarding magnitude:
-
-```python
-[3.0, 4.0] -> [0.6, 0.8]
-```
-
-This is the default because it makes cosine similarity fast and direction-only,
-which is the common case for semantic embeddings. Use `normalize=False` when
-vector length matters, such as when magnitude encodes strength, confidence,
-counts, scale, or raw geometry.
-
-Zero vectors are rejected when `normalize=True` because they cannot be scaled to
-unit length. Raw stores accept zero vectors for dot-product and Euclidean
-search. Because cosine similarity is undefined for zero vectors,
-`cosine_search` raises an error when its selected rows include one; use
-`within_rows` to exclude zero rows when needed.
-
-Cosine search also requires a non-zero query. Dot-product and Euclidean searches
-require one when `normalize=True`, because they normalize the query before
-comparison. With `normalize=False`, both methods accept a zero query. These
-rules apply even when the store or `within_rows` selection is empty.
-
-### Numerical inputs
-
-Stored vectors use `float32` to keep the store compact. Vectors and queries must
-be real-valued array-like inputs that remain finite when converted to `float32`.
-Complex-valued inputs raise `TypeError` rather than silently losing their
-imaginary components. Search thresholds must also be finite. Invalid values are
-rejected before they can affect stored state or ranking.
-
-Norms and raw metric values use `float64` accumulation where `float32`
-intermediate calculations could overflow or underflow. This allows finite
-`float32` vectors across the representable magnitude range to be normalized and
-compared reliably.
-
-| Method | `normalize=True` default | `normalize=False` |
-|---|---|---|
-| `cosine_search` | True cosine similarity over stored unit vectors; fastest/default path for embeddings | True cosine similarity over raw vectors; computes vector norms during search |
-| `dot_search` | Dot product of unit vectors, effectively equivalent to cosine similarity | True dot product over original vectors; use when magnitude should affect ranking |
-| `euclidean_search` | Distance between normalized directions; useful only when direction-normalized distance is intended | True Euclidean distance over original vectors; use for geometric/feature-space nearest neighbors |
-| `get` | Returns normalized vectors | Returns original vectors |
-| `save` | Saves normalized vectors | Saves raw vectors |
-| `open` and `reload` | Restore normalized storage semantics | Restore raw vectors exactly as stored |
-
-## Search Methods
-
-Use `cosine_search` for semantic embeddings and direction-only similarity:
-
-```python
-hits = store.cosine_search(query, top_k=10, min_value=0.75)
-```
-
-Use `dot_search` with `normalize=False` when larger-magnitude vectors should
-rank higher:
-
-```python
-store = VectorStore[dict[str, str]](dimensions=3, normalize=False)
-store.add(vectors, metadata)
-hits = store.dot_search(query, top_k=10, min_value=0.0)
-```
-
-Use `euclidean_search` with `normalize=False` for raw coordinate or feature-space
-nearest-neighbor search:
-
-```python
-store = VectorStore[dict[str, str]](dimensions=3, normalize=False)
-store.add(vectors, metadata)
-hits = store.euclidean_search(query, top_k=10, max_value=1.5)
-```
-
-### Result ordering
-
-Cosine and dot-product results are ordered from larger values to smaller
-values. Euclidean results are ordered from smaller distances to larger ones.
-When two computed values are exactly equal, the row with the lower original
-store index comes first.
-
-The same rule determines which tied rows cross the `top_k` boundary. It also
-applies to `within_rows`: the original store index breaks a tie, regardless of
-the order in which filtered row indexes were supplied. Values that are close
-but not exactly equal remain ordered by their computed metric value.
-
-## Prefiltering
-
-The store does not implement a metadata query language. To filter by metadata,
-produce row indexes first, then pass them with `within_rows`.
-
-```python
-rows = [
-    i
-    for i, metadata in enumerate(store.metadata)
-    if metadata["title"].startswith("x")
-]
-
-hits = store.cosine_search(query, top_k=10, within_rows=rows)
-```
-
-Each stored row may appear at most once in `within_rows`; duplicate indexes are
-rejected rather than producing duplicate hits. An empty sequence returns no
-hits, but it does not bypass validation of the query or other search arguments.
-
-Searches without `within_rows` compute directly against the stored vector matrix
-and do not make a full copy of it. A filtered search gathers the selected rows
-into a temporary matrix, so its additional memory use scales with the number of
-selected rows and the vector dimensions. Omit `within_rows` when every row
-should be searched; passing every row explicitly would create an unnecessary
-full-size temporary matrix.
-
-For structured NumPy metadata, use NumPy to produce the row indexes:
-
-```python
-metadata_table = np.array(
-    [
-        ("intro", "A", 2024),
-        ("setup", "A", 2023),
-        ("guide", "B", 2024),
-    ],
-    dtype=[("title", "U20"), ("product", "U10"), ("year", "i4")],
-)
-
-store = VectorStore[int](dimensions=3)
-store.add(vectors, metadata=np.arange(len(metadata_table)))
-
-mask = (metadata_table["product"] == "A") & (metadata_table["year"] >= 2024)
-rows = np.flatnonzero(mask)
-
-hits = store.cosine_search(query, within_rows=rows)
-
-for hit in hits:
-    row = metadata_table[hit.metadata]
-    print(row["title"], hit.value)
-```
-
-## Thread safety
-
-`VectorStore` does not use internal locks. Multiple threads may call search,
-`get()`, or the inspection properties on the same instance while its rows,
-configuration, binding, and metadata payloads remain unchanged.
-
-If any thread may call `add()`, `clear()`, `reload()`, or `save()`, every access
-to that store must use the same application-level lock or another external
-synchronization mechanism. The same rule applies when application code mutates
-a metadata payload shared with the store. In particular, do not overlap a save
-with an in-memory mutation: an atomic file replacement cannot turn two separate
-array reads into a consistent store snapshot.
-
-Separate store instances writing the same path also need external writer
-coordination. Atomic replacement prevents readers from seeing a partially
-written archive, but concurrent writers can replace one another and the last
-successful replacement wins.
-
-## Persistence
-
-Create a new store normally, then supply its destination on the first save:
-
-```python
-store = VectorStore[dict[str, str]](dimensions=1536)
-store.add(embeddings, metadata)
-store.save("vectors.npz")
-```
-
-`save(path)` writes the archive and binds that path to the store. Later
-`save()` calls update the bound archive. Passing another path performs a Save
-As operation; the new path becomes the binding only after the write succeeds.
-
-Open an existing store directly from its self-describing archive:
-
-```python
-store = VectorStore[dict[str, str]].open("vectors.npz")
-```
-
-`open()` restores `dimensions` and `normalize` from the archive and binds its
-path. Use `reload()` when the file may have changed externally and you
-explicitly want to discard current in-memory changes:
-
-```python
-store.reload()
-```
-
-`reload()` always rereads the bound archive and raises if the store is unbound,
-the file is missing, or the archive is invalid. A failed reload leaves the
-current in-memory vectors and metadata unchanged.
-
-When `save(path)` or `open(path)` receives a relative path, the store anchors it
-to the current working directory as part of the binding. `file_path` therefore
-returns an absolute path, and a later working-directory change cannot redirect
-`save()` or `reload()` to another file. Anchoring does not canonicalize the path:
-`..` components and symlinks retain their normal filesystem meaning.
-
-The `.npz` suffix may be omitted. An extensionless path such as `"vectors"` is
-resolved to `"vectors.npz"` for saving, opening, and reloading.
-
-Persistence paths accept strings and string-valued `os.PathLike` objects such
-as `pathlib.Path`. Passing an empty path raises `ValueError`; passing `None`,
-bytes, or another non-path value to `open()` raises `TypeError`. For `save()`,
-`None` retains its established meaning: reuse the current binding, or raise
-`ValueError` if the store has not been bound yet.
-
-Raw-vector configuration is also restored from the archive:
-
-```python
-store = VectorStore[dict[str, str]](
-    dimensions=1536,
-    normalize=False,
-)
-store.add(raw_vectors, metadata)
-store.save("raw-vectors.npz")
-
-loaded = VectorStore[dict[str, str]].open("raw-vectors.npz")
-assert loaded.normalize is False
-```
-
-Archives written by 0.4 use format version 1 and contain `format_version`,
-`dimensions`, `normalize`, `vectors`, and `metadata`. The compatibility suite
-opens an archive generated by the published 0.4.0 package on the oldest
-supported Python and NumPy versions. The stored configuration prevents an
-archive from being loaded with different dimensions or normalization semantics.
-
-This is a forward-reading promise for self-describing format-version-1
-archives: current releases can open the recorded 0.4 fixture. It does not
-restore the unversioned two-array reader or guarantee that an older package can
-open files written by an arbitrary future archive format.
-
-Opening and reloading validate the complete schema, array dtypes and shapes, row
-counts, finite vector values, and zero-norm behavior before changing in-memory
-state. Opaque metadata values remain individual row payloads across persistence
-round trips.
-
-Persistence failures keep their owning exception type. Filesystem failures use
-the relevant `OSError` subclass, malformed schemas use `ValueError`, and NumPy,
-pickle, or application metadata-loading exceptions are not wrapped in a package
-exception. Exact message text remains explanatory rather than a compatibility
-guarantee.
-
-Each save writes a uniquely named temporary archive in the destination
-directory, closes it, and then replaces the destination with `os.replace`.
-Readers opening the destination path therefore see either the previous complete
-archive or the new complete archive rather than a partially written file. If
-writing or replacement fails, the previous destination remains in place and the
-temporary file is removed.
-
-Atomic replacement is not file locking or multi-writer coordination. Concurrent
-writers can still replace one another, and the library does not promise that a
-successful save has reached durable hardware storage across every operating
-system or power failure.
-
-Version 0.7 reads only self-describing format version 1 archives. Unversioned
-archives containing only `vectors` and `metadata` cannot be opened because they
-do not record dimensions or normalization semantics. Recreate those archives
-from source data, or convert them with NumPy Vector Store 0.4 before upgrading.
-
-Constructor `file_path=`, instance `load()`, and context-manager persistence
-were removed in 0.5. See the [persistence migration guide](MIGRATION.md) for the
-direct replacements and the pre-upgrade procedure for an unversioned archive.
-
-Metadata persistence uses `allow_pickle=True` for flexible Python payloads, so
-only load files generated by your own application or another trusted local
-process. Loading untrusted `.npz` files is not a supported security model.
+Only open trusted archives: metadata uses NumPy's pickle-backed object arrays.
+Loading untrusted data can execute code. Format-version-1 archives are
+self-describing and retain dimensions and normalization settings. Relative paths
+are anchored when bound; later working-directory changes do not redirect them.
+Saving uses atomic replacement but does not provide locks or multi-writer
+coordination. Writes are always explicit; there is no autosave context manager.
+
+Configuration and row inspection properties are read-only. `get(index)` returns
+an independent vector copy and the shared metadata payload, or `None` when the
+integer row index is outside the store. Inspection views describe the rows
+present when requested; refresh them after mutation. Mutable metadata remains
+application-owned and shared by reference.
+
+Concurrent reads are supported only while store state and shared metadata stay
+unchanged. If any thread may mutate or save, synchronize **every access** to the
+store with the same application-level lock. Separate writers to the same archive
+also need coordination.
+
+The documentation source lives in [docs/](https://github.com/tvr-works/numpy-vector-store/tree/main/docs).
+The full guides cover
+[search and filtering](https://github.com/tvr-works/numpy-vector-store/blob/main/docs/search.md),
+[persistence](https://github.com/tvr-works/numpy-vector-store/blob/main/docs/persistence.md), and
+[state and threading](https://github.com/tvr-works/numpy-vector-store/blob/main/docs/ownership.md).
+To browse the rendered documentation locally, see
+[the documentation contributor guide](https://github.com/tvr-works/numpy-vector-store/blob/main/DOCUMENTATION.md).
 
 ## Compatibility
 

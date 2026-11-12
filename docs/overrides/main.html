@@ -1,0 +1,25 @@
+{% extends "base.html" %}
+
+{% block extrahead %}
+  {{ super() }}
+  {% set title = config.site_name %}
+  {% set description = config.site_description %}
+  {% if page %}
+    {% set title = page.title | default(config.site_name, true) %}
+    {% if page.meta %}
+      {% set title = page.meta.title | default(title, true) %}
+      {% set description = page.meta.description | default(description, true) %}
+    {% endif %}
+  {% endif %}
+  <meta property="og:type" content="website">
+  <meta property="og:site_name" content="{{ config.site_name | e }}">
+  <meta property="og:title" content="{{ title | e }}">
+  <meta property="og:description" content="{{ description | e }}">
+  {% if page and page.canonical_url %}<meta property="og:url" content="{{ page.canonical_url | e }}">{% endif %}
+  <meta name="twitter:card" content="summary">
+  {% if not page or not page.title %}<meta name="robots" content="noindex, follow">{% endif %}
+{% endblock %}
+
+{% block announce %}
+  {% if config.extra.docs_status == "development" %}Development · {% endif %}<strong>{{ config.extra.docs_version }}</strong> documentation · Python 3.11+
+{% endblock %}

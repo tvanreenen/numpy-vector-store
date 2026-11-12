@@ -31,6 +31,7 @@ dependencies = [
 
 [project.urls]
 Homepage = "https://github.com/tvr-works/numpy-vector-store"
+Documentation = "https://nvs.tvr.works/"
 Repository = "https://github.com/tvr-works/numpy-vector-store"
 Issues = "https://github.com/tvr-works/numpy-vector-store/issues"
 
@@ -38,7 +39,19 @@ Issues = "https://github.com/tvr-works/numpy-vector-store/issues"
 packages = ["src/numpy_vector_store"]
 
 [tool.hatch.build.targets.sdist]
-exclude = ["/.codex"]
+exclude = [
+    "/.codex",
+    "/.venv-docs",
+    "/.cache",
+    "/site",
+    "/docs",
+    "/zensical.toml",
+    "/DOCUMENTATION.md",
+    "/tools/docs.py",
+    "/tools/docs_gate.py",
+    "/tools/docs_tests.py",
+    "/.github/workflows/docs.yml",
+]
 
 [tool.hatch.version]
 path = "src/numpy_vector_store/__init__.py"
@@ -83,4 +96,8 @@ dev = [
     "pytest>=8.4.2",
     "pytest-cov>=4.0.0",
     "ruff>=0.13.3",
+]
+docs = [
+    "mkdocstrings-python==2.0.10",
+    "zensical==0.1.1",
 ]
