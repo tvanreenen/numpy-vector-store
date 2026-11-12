@@ -19,7 +19,3 @@
   <meta name="twitter:card" content="summary">
   {% if not page or not page.title %}<meta name="robots" content="noindex, follow">{% endif %}
 {% endblock %}
-
-{% block announce %}
-  {% if config.extra.docs_status == "development" %}Development · {% endif %}<strong>{{ config.extra.docs_version }}</strong> documentation · Python 3.11+
-{% endblock %}

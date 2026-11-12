@@ -3,8 +3,6 @@ title: Vector search, without the infrastructure.
 description: Exact, in-process vector search powered by NumPy. Get started with a small typed Python API and your own embeddings.
 ---
 
-<p class="edition">Python library · 0.7.0</p>
-
 # Vector search, without the infrastructure.
 
 <p class="intro">Exact, in-process vector search powered by NumPy.</p>
@@ -28,8 +26,6 @@ selected row, with no approximate index or background service.
     ```sh
     python -m pip install numpy-vector-store
     ```
-
-**Python 3.11+** · **NumPy 1.23.2+** · [Installation details](getting-started.md)
 
 ## Your first search
 
