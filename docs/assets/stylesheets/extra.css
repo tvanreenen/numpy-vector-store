@@ -32,6 +32,7 @@
 :focus-visible { outline: 3px solid var(--md-primary-fg-color); outline-offset: 4px; }
 .md-typeset :is(h1, h2, h3, h4, [id]) { scroll-margin-top: 5rem; }
 .md-typeset .doc-signature { overflow-x: auto; }
+.md-typeset .doc-label { opacity: 1; }
 .md-typeset .doc-labels code { color: var(--md-default-fg-color--light); }
 .md-typeset .md-code__button { color: var(--md-default-fg-color--light); }
 
