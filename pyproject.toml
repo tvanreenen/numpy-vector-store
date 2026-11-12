@@ -31,6 +31,7 @@ dependencies = [
 
 [project.urls]
 Homepage = "https://github.com/tvr-works/numpy-vector-store"
+Documentation = "https://nvs.tvr.works/"
 Repository = "https://github.com/tvr-works/numpy-vector-store"
 Issues = "https://github.com/tvr-works/numpy-vector-store/issues"
 

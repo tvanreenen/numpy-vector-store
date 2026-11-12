@@ -1,5 +1,7 @@
 # NumPy Vector Store
 
+[Documentation](https://nvs.tvr.works/) · [API reference](https://nvs.tvr.works/reference/)
+
 A fast, lightweight, zero-setup in-memory vector store powered by NumPy.
 
 - **Tiny local vector search** for projects that do not need a vector database
