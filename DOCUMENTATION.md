@@ -129,11 +129,16 @@ Use these settings in both production and preview environments:
 | Preview branches | All non-production branches in this repository |
 | Build output directory | `site` |
 | Python environment variable | `PYTHON_VERSION=3.13.5` |
+| Dependency-install environment variable | `SKIP_DEPENDENCY_INSTALL=1` |
 | Build command | Command below |
 
 ```sh
 python -m pip install uv==0.13.7 && uv sync --locked --no-default-groups --group docs && uv run --locked --no-default-groups --group docs python tools/docs.py pages
 ```
+
+Disabling automatic dependency installation lets the build command install the
+pinned uv version before reading the lockfile and install only the docs group
+plus the local package.
 
 Pages supplies `CF_PAGES_COMMIT_SHA` and `CF_PAGES_BRANCH`. The `pages` command
 checks the checkout SHA and tracked cleanliness, then polls the public GitHub
