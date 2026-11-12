@@ -110,15 +110,17 @@ Check focus, contrast, reduced motion, console errors, and horizontal overflow.
 Browser QA is local for this first milestone; there is no committed browser
 dependency or flaky browser step in package CI.
 
-## Later Cloudflare Pages publication
+## Cloudflare Pages publication
 
 No hosting project, DNS record, GitHub secret, package publisher, or account
-setting is created by the local build. The selected canonical URL is
+setting is created by the local build. The canonical URL is
 `https://nvs.tvr.works/`. If it changes, update `site_url` in `zensical.toml`
 and the sitemap URL in `docs/robots.txt`, then rerun the checks.
 
-When publication is authorized, connect Cloudflare Pages to the existing public
+The Cloudflare Pages project is `nvs`, with the provider hostname
+`nvs-1nz.pages.dev`. It connects to the existing public
 `tvr-works/numpy-vector-store` repository through the Cloudflare GitHub app.
+The app must have access to this repository for automatic push deployments.
 Use these settings in both production and preview environments:
 
 | Setting | Value |
@@ -133,12 +135,14 @@ Use these settings in both production and preview environments:
 | Build command | Command below |
 
 ```sh
-python -m pip install uv==0.13.7 && uv sync --locked --no-default-groups --group docs && uv run --locked --no-default-groups --group docs python tools/docs.py pages
+python -m pip install uv==0.13.7 && python -m uv sync --locked --no-default-groups --group docs && python -m uv run --locked --no-default-groups --group docs python tools/docs.py pages
 ```
 
 Disabling automatic dependency installation lets the build command install the
 pinned uv version before reading the lockfile and install only the docs group
 plus the local package.
+Invoke uv through the same Python interpreter that installed it: newly installed
+executables may not appear on the Pages shell's PATH until its shims refresh.
 
 Pages supplies `CF_PAGES_COMMIT_SHA` and `CF_PAGES_BRANCH`. The `pages` command
 checks the checkout SHA and tracked cleanliness, then polls the public GitHub
