@@ -293,7 +293,8 @@ class VectorStore(Generic[TMetadata]):
     ) -> npt.NDArray[np.float64]:
         """Compute Euclidean distance values."""
         if self._normalize:
-            differences = vectors - query
+            # Accumulate squared differences in float64 before taking the root.
+            return self._row_norms(vectors - query)
         else:
             differences = np.empty(vectors.shape, dtype=np.float64)
             np.subtract(vectors, query, out=differences, dtype=np.float64)

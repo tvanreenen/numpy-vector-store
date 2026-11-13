@@ -565,6 +565,30 @@ class TestVectorStore:
         assert [hit.index for hit in results] == [0, 1]
         assert [hit.value for hit in results] == pytest.approx([0.0, np.sqrt(0.8)])
 
+    @pytest.mark.parametrize(
+        "magnitude",
+        [1e-25, 1e-30, np.nextafter(np.float32(0), np.float32(1))],
+    )
+    @pytest.mark.parametrize("within_rows", [None, [1, 0]])
+    def test_normalized_euclidean_preserves_tiny_distances(
+        self, magnitude, within_rows
+    ):
+        """Test distance underflow cannot change ranking or threshold results."""
+        store = VectorStore[str](dimensions=2)
+        store.add([[1.0, magnitude], [1.0, 0.0]], ["farther", "exact"])
+
+        results = store.euclidean_search([1.0, 0.0], within_rows=within_rows)
+
+        assert [hit.index for hit in results] == [1, 0]
+        assert results[0].value == 0.0
+        assert results[1].value == pytest.approx(float(np.float32(magnitude)), abs=0)
+        nearest = store.euclidean_search([1.0, 0.0], top_k=1, within_rows=within_rows)
+        assert [hit.index for hit in nearest] == [1]
+        exact = store.euclidean_search(
+            [1.0, 0.0], max_value=0.0, within_rows=within_rows
+        )
+        assert [hit.index for hit in exact] == [1]
+
     def test_metric_searches_support_within_rows(self):
         """Test dot and Euclidean search support prefiltered row indexes."""
         store = VectorStore[dict[str, str]](dimensions=2, normalize=False)
