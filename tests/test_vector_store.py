@@ -565,6 +565,30 @@ class TestVectorStore:
         assert [hit.index for hit in results] == [0, 1]
         assert [hit.value for hit in results] == pytest.approx([0.0, np.sqrt(0.8)])
 
+    @pytest.mark.parametrize(
+        "magnitude",
+        [1e-25, 1e-30, np.nextafter(np.float32(0), np.float32(1))],
+    )
+    @pytest.mark.parametrize("within_rows", [None, [1, 0]])
+    def test_normalized_euclidean_preserves_tiny_distances(
+        self, magnitude, within_rows
+    ):
+        """Test distance underflow cannot change ranking or threshold results."""
+        store = VectorStore[str](dimensions=2)
+        store.add([[1.0, magnitude], [1.0, 0.0]], ["farther", "exact"])
+
+        results = store.euclidean_search([1.0, 0.0], within_rows=within_rows)
+
+        assert [hit.index for hit in results] == [1, 0]
+        assert results[0].value == 0.0
+        assert results[1].value == pytest.approx(float(np.float32(magnitude)), abs=0)
+        nearest = store.euclidean_search([1.0, 0.0], top_k=1, within_rows=within_rows)
+        assert [hit.index for hit in nearest] == [1]
+        exact = store.euclidean_search(
+            [1.0, 0.0], max_value=0.0, within_rows=within_rows
+        )
+        assert [hit.index for hit in exact] == [1]
+
     def test_metric_searches_support_within_rows(self):
         """Test dot and Euclidean search support prefiltered row indexes."""
         store = VectorStore[dict[str, str]](dimensions=2, normalize=False)
@@ -779,6 +803,90 @@ class TestVectorStore:
 
         with pytest.raises(IndexError, match="outside"):
             getattr(store, search_name)([1.0, 0.0], within_rows=[len(store)])
+
+    @pytest.mark.parametrize(
+        "search_name", ["cosine_search", "dot_search", "euclidean_search"]
+    )
+    @pytest.mark.parametrize(
+        "within_rows",
+        [
+            [0, np.uint64(1)],
+            [np.int64(0), np.uint64(1)],
+            (np.uint64(1), 0),
+            [IndexValue(0), np.uint64(1)],
+        ],
+    )
+    def test_metric_searches_accept_mixed_integer_row_selectors(
+        self, search_name, within_rows
+    ):
+        """Test sequence dtype inference cannot turn valid indexes into floats."""
+        store = VectorStore[str](dimensions=2)
+        store.add([[1.0, 0.0], [0.0, 1.0]], ["x", "y"])
+
+        results = getattr(store, search_name)([1.0, 0.0], within_rows=within_rows)
+
+        assert [hit.index for hit in results] == [0, 1]
+        assert [hit.metadata for hit in results] == ["x", "y"]
+
+    @pytest.mark.parametrize(
+        "search_name", ["cosine_search", "dot_search", "euclidean_search"]
+    )
+    @pytest.mark.parametrize("populated", [False, True])
+    @pytest.mark.parametrize(
+        ("within_rows", "exception"),
+        [
+            ([0, np.uint64(0)], ValueError),
+            ([0, np.uint64(2)], IndexError),
+            ([-1, np.uint64(0)], IndexError),
+            ([0, np.iinfo(np.uint64).max], IndexError),
+            ([np.uint64(0), True], TypeError),
+            ([np.uint64(0), 1.0], TypeError),
+            ([0, 1.5], TypeError),
+            ([10**400, 1.0], TypeError),
+            ([np.uint64(0), 10**100], IndexError),
+        ],
+    )
+    def test_mixed_integer_row_selectors_preserve_validation(
+        self, search_name, populated, within_rows, exception
+    ):
+        """Test mixed selectors preserve duplicate, bounds, and type errors."""
+        store = VectorStore[str](dimensions=2)
+        if populated:
+            store.add([[1.0, 0.0], [0.0, 1.0]], ["x", "y"])
+
+        with pytest.raises(exception):
+            getattr(store, search_name)([1.0, 0.0], within_rows=within_rows)
+
+    @pytest.mark.parametrize(
+        "search_name", ["cosine_search", "dot_search", "euclidean_search"]
+    )
+    @pytest.mark.parametrize(
+        "within_rows",
+        [[1, 0], (1, 0), range(1, -1, -1), [np.int32(1), np.int64(0)]],
+    )
+    def test_native_integer_sequences_use_bulk_row_validation(
+        self, search_name, within_rows, monkeypatch
+    ):
+        """Test ordinary selectors do not pay for per-index fallback checks."""
+        store = VectorStore[str](dimensions=2)
+        store.add([[1.0, 0.0], [0.0, 1.0]], ["x", "y"])
+        integer_checks = []
+        original_validate_integer = store._validate_integer
+
+        def record_integer_check(value, *, name):
+            integer_checks.append(value)
+            return original_validate_integer(value, name=name)
+
+        monkeypatch.setattr(store, "_validate_integer", record_integer_check)
+
+        results = getattr(store, search_name)(
+            [1.0, 0.0], top_k=2, within_rows=within_rows
+        )
+
+        assert [hit.index for hit in results] == [0, 1]
+        assert [hit.metadata for hit in results] == ["x", "y"]
+        # Only top_k needs scalar validation; the row indexes use bulk checks.
+        assert integer_checks == [2]
 
     def test_native_integer_row_selectors_remain_zero_copy(self):
         """Test common NumPy selectors stay on the vectorized validation path."""

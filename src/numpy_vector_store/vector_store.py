@@ -293,7 +293,8 @@ class VectorStore(Generic[TMetadata]):
     ) -> npt.NDArray[np.float64]:
         """Compute Euclidean distance values."""
         if self._normalize:
-            differences = vectors - query
+            # Accumulate squared differences in float64 before taking the root.
+            return self._row_norms(vectors - query)
         else:
             differences = np.empty(vectors.shape, dtype=np.float64)
             np.subtract(vectors, query, out=differences, dtype=np.float64)
@@ -516,16 +517,19 @@ class VectorStore(Generic[TMetadata]):
         if isinstance(within_rows, np.ndarray):
             rows = np.asarray(within_rows)
         else:
-            has_nested_rows = False
+            all_native_integers = True
             for row in within_rows:
                 if isinstance(row, (bool, np.bool_)):
                     raise TypeError("within_rows must contain integer row indexes")
-                if isinstance(row, (list, tuple, np.ndarray)):
-                    has_nested_rows = True
+                if not isinstance(row, (int, np.integer)):
+                    all_native_integers = False
+            # Keep ordinary integer sequences on the bulk validation path.
             rows = np.asarray(
-                within_rows,
-                dtype=object if has_nested_rows else None,
+                within_rows, dtype=None if all_native_integers else object
             )
+            if all_native_integers and not np.issubdtype(rows.dtype, np.integer):
+                # Mixed signed/unsigned integers can otherwise become floats.
+                rows = np.asarray(within_rows, dtype=object)
 
         if rows.ndim != 1:
             raise ValueError("within_rows must be a 1D sequence of row indexes")
