@@ -47,7 +47,17 @@ The artifact smoke test checks the installed package rather than the source chec
 3. Squash merge the release pull request into `main`, then confirm the `main` checks pass.
 4. Create a GitHub release targeting the merged commit with a `v<version>` tag and release notes that explain behavior, motivation, compatibility, user impact, and verification.
 5. Publish the GitHub release. The release event calls `Checks` again for the tagged commit and supplies the tag to the distribution-version verifier.
-6. Confirm that validation finishes before the PyPI job starts, then verify the new version, files, metadata, and attestations on PyPI.
+6. Confirm that validation finishes before the PyPI job starts. On PyPI, verify the new version, the expected wheel and source distribution, their metadata, and provenance for `tvr-works/numpy-vector-store`, `publish-pypi.yml`, and the `pypi` environment.
+7. Copy the published wheel's exact PyPI file URL and run the installed-distribution probe in a clean environment:
+
+   ```bash
+   uv run --isolated --no-project --python 3.11 \
+     --with <exact-pypi-wheel-url> \
+     python tools/verify_installed_distribution.py
+   ```
+
+   Confirm that the probe reports the released version from the isolated environment rather than the source checkout.
+8. For the first production release after the `tvr-works` migration, remove the obsolete `tvanreenen/numpy-vector-store` production Trusted Publisher only after steps 6 and 7 pass. If upload, provenance, or installation verification fails, retain both production publisher records and investigate before changing publishing access.
 
 The release workflow requires the source version, wheel metadata, source-distribution metadata, and Git tag to agree. A mismatch stops before the OIDC publishing job. Published PyPI files are immutable; do not delete or replace a release to correct code. Prepare a new semantic version instead.
 
@@ -63,6 +73,8 @@ Both indexes trust the GitHub organization repository through environment-bound 
 |---|---|---|---|
 | TestPyPI | `publish-testpypi.yml` | `testpypi` | `main` branch |
 | PyPI | `publish-pypi.yml` | `pypi` | tags matching `v*` |
+
+TestPyPI qualified its replacement publisher with the `0.7.0` upload on November 11, 2026, and the obsolete TestPyPI publisher has been removed. The environment-bound production publisher is configured but has not completed a real PyPI upload. Its obsolete predecessor remains available only as a temporary rollback path until the next independently planned release passes the production checks above.
 
 The environments contain no publishing token or other secret. PyPI exchanges the workflow's GitHub OIDC identity for a short-lived upload token. The environment name is part of that identity and must match the corresponding Trusted Publisher exactly. See [GitHub deployment environments](https://docs.github.com/en/actions/reference/workflows-and-actions/deployments-and-environments) and [PyPI Trusted Publisher configuration](https://docs.pypi.org/trusted-publishers/adding-a-publisher/).
 
