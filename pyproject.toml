@@ -98,5 +98,3 @@ dev = [
     "pytest-cov>=4.0.0",
     "ruff>=0.13.3",
 ]
-# Compatibility for the existing Pages bootstrap; tools live in tools/docs-env.
-docs = []

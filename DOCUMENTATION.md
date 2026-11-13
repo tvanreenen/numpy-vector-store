@@ -6,6 +6,28 @@ Python dependency beyond the library's existing NumPy requirement. Documentation
 tools and the published package used by the site are pinned independently in
 `tools/docs-env/pyproject.toml` and its `uv.lock`.
 
+## How the pieces fit
+
+Library development and public documentation need different copies of NVS.
+Library tests use the code being developed; the public reference and guide
+examples use the published release that readers can install.
+
+`tools/docs-env/` is the documentation's toolbox. Its `pyproject.toml` lists
+the released NVS package and documentation tools, and its `uv.lock` records
+their exact dependencies and artifact hashes. uv installs them into a generated,
+ignored `.venv/` inside that folder. This is a build-only environment, not
+another library to publish. The documentation itself still lives in `docs/`.
+
+`tools/docs.py` supplies the build instructions. It checks that the installed
+package matches the documented release, builds the site, checks links and
+metadata, and runs the displayed examples. Its `serve` command previews the
+site locally; its `pages` command also checks publication eligibility and
+prepares preview indexing rules.
+
+Your laptop, GitHub Actions, and Cloudflare use the same toolbox and script.
+The build writes static files to `site/`. Visitors receive those files; neither
+Python nor the documentation environment runs when they visit the website.
+
 ## Build and preview
 
 ```sh
@@ -34,10 +56,9 @@ build; there is no fallback to checkout source or another release.
 With uv installed, `python tools/docs.py check` and `python tools/docs.py serve`
 also enter the isolated environment automatically. The launcher removes inherited
 Python import paths and environment-location overrides before invoking the
-locked docs project. The old root `--group docs` command remains a compatibility
-entry point for the existing Pages build command, not the source of docs tools.
-The root group is empty; no library development dependency is added to the docs
-project.
+locked docs project. Documentation builds do not install the root library
+project or its development dependencies. There is no root `docs` dependency
+group; select `tools/docs-env` when invoking uv directly.
 
 ## Content and canonical sources
 
@@ -171,17 +192,24 @@ Use these settings in both production and preview environments:
 | Build command | Command below |
 
 ```sh
-python -m pip install uv==0.13.7 && python -m uv sync --locked --no-default-groups --group docs && python -m uv run --locked --no-default-groups --group docs python tools/docs.py pages
+python -m pip install uv==0.13.7 && python -m uv run --project tools/docs-env --locked python tools/docs.py pages
 ```
 
-This existing Pages command remains supported. Its root `docs` group is now
-empty; `tools/docs.py pages` hands off to the independently locked docs project
-before importing the package, checking the edition, or building the site.
-No hosting-setting change is required to adopt this separation. For a future
-bootstrap cleanup, the two root-project uv commands can be replaced with
-`python -m uv run --project tools/docs-env --locked python tools/docs.py pages`.
+Pages starts directly in the documentation environment, without first installing
+the root library project. `uv run --locked` installs or reuses the locked
+documentation dependencies before running the script; a separate sync step is
+not needed.
 Invoke uv through the same Python interpreter that installed it: newly installed
 executables may not appear on the Pages shell's PATH until its shims refresh.
+
+The build command is a project-wide setting shared by production and previews.
+When adopting this command, first push a branch containing `tools/docs-env/`,
+then update the Pages setting and verify that branch's exact-commit preview.
+Merge that branch to make the command work for subsequent `main` builds too.
+Between the setting change and merge, builds of older revisions without the
+docs project will fail; the existing deployed website stays available. Rebuilding
+an older revision requires restoring its matching build command. Rolling back
+to an existing successful deployment does not require rebuilding it.
 
 Pages supplies `CF_PAGES_COMMIT_SHA` and `CF_PAGES_BRANCH`. The `pages` command
 checks the checkout SHA and tracked cleanliness, then polls the public GitHub

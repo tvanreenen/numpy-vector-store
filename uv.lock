@@ -269,7 +269,6 @@ dev = [
     { name = "pytest-cov", specifier = ">=4.0.0" },
     { name = "ruff", specifier = ">=0.13.3" },
 ]
-docs = []
 
 [[package]]
 name = "packaging"

@@ -335,7 +335,7 @@ def prepare_pages_output(site: Path, branch: str) -> None:
 
 
 def enter_docs_environment(command: str) -> None:
-    """Keep legacy callers working without importing their editable package."""
+    """Enter the pinned docs project for direct script invocations."""
     if Path(sys.prefix).resolve() != (DOCS_PROJECT / ".venv").resolve():
         environment = os.environ.copy()
         for key in (
