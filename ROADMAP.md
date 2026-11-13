@@ -528,6 +528,37 @@ backend, streaming, async, builder, or metadata-query APIs. It does not split
 the cohesive `VectorStore` module, add runtime dependencies, customize
 `VectorHit` comparison, or introduce archive format version 2.
 
+## 0.7.1: Search correctness and release reliability
+
+Status: release prepared; publication pending
+
+The focused 1.0 readiness review found two defects within the existing search
+contract, not a need for structural redesign. This patch makes those corrections
+available to 0.7 users without tying them to the separate 1.0 stability decision.
+
+Prepared changes:
+
+- Preserve tiny normalized Euclidean distances so underflow cannot turn a
+  nonzero computed distance into an exact tie, alter the nearest-row selection,
+  or bypass a zero-distance threshold.
+- Preserve integer row-selector types when Python and NumPy signed/unsigned
+  integers are mixed, while retaining bulk validation for ordinary integer
+  sequences and native NumPy arrays.
+- Add regression coverage for corrected search results, accepted mixed indexes,
+  unchanged validation failures, and the ordinary-sequence fast path. Keep
+  wall-clock timing thresholds out of CI.
+- Include the documentation site, deployment guidance, README and project-link
+  refresh, and verified-artifact publishing workflow already merged since 0.7.0.
+
+The API, `float32` storage, Python/NumPy support, and format-version-1 archive
+contract are unchanged. No application-code or data migration is required.
+The website stays on the verified published 0.7.0 edition until 0.7.1 has been
+uploaded and qualified, then advances through a separate documentation update.
+
+Publication and its post-upload checks are still required. Preparing this patch
+does not publish it, declare 1.0 stability, or restart the entire 0.7 adoption
+cycle.
+
 ## 1.0.0: Stable contracts
 
 The project will be ready for 1.0 when:

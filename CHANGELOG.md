@@ -8,6 +8,88 @@ release notes remain available on the
 
 <!-- --8<-- [end:introduction] -->
 
+## 0.7.1 - 2026-11-13
+
+This patch release corrects two search edge cases without changing the public
+API, runtime requirements, or archive format. It also includes the documentation,
+package-presentation, and release-workflow improvements merged since 0.7.0.
+
+Most applications can upgrade without code changes or data migration. The
+observable corrections are that very small normalized Euclidean distances no
+longer collapse to zero, and valid row filters containing different integer
+types are accepted.
+
+### Search correctness
+
+- Accumulate normalized Euclidean squared differences in `float64` before
+  taking their square root. Previously, a small difference could be represented
+  in `float32` while its square was too small to represent, making a nonzero
+  distance appear to be zero.
+- Preserve nearest-row ordering, `top_k` selection, and zero-distance threshold
+  filtering for these cases, both with and without `within_rows`. Vector
+  storage remains `float32`; raw Euclidean, cosine, and dot-product calculation
+  paths are unchanged.
+- Accept mixed Python and NumPy integer row filters such as
+  `[0, np.uint64(1)]`. NumPy can infer a floating-point array for mixed signed
+  and unsigned integers; validation now retains the original values when that
+  conversion would erase their integer types.
+- Keep bulk validation for ordinary integer lists, tuples, and ranges, and
+  preserve the native NumPy integer-array fast path. Custom integer-index
+  objects continue to use the existing per-element validation fallback.
+- Continue rejecting booleans, floating-point indexes, malformed shapes,
+  duplicate rows, and out-of-range indexes. Validation remains independent of
+  whether the store is empty.
+
+### Documentation and package presentation
+
+- Add the searchable [documentation website](https://vectors.tvr.works/) with
+  getting-started, search/filtering, persistence, ownership, deployment,
+  performance, API-reference, and compatibility guidance.
+- Clarify the README's small-to-medium, in-process search positioning. Explain
+  deployment with an archive shipped alongside application code, where each
+  worker or replica loads its own in-memory store without a separate vector
+  database or shared-write coordination.
+- Update package project links to the existing repository's new
+  `tvr-works/numpy-vector-store` location and add the documentation URL.
+  Distribution and import names remain `numpy-vector-store` and
+  `numpy_vector_store`.
+- Keep documentation source, generated output, build tools, and the independent
+  docs environment out of the source distribution. Wheels remain package-only;
+  documentation tools add no runtime dependency.
+- Build the public reference and executable guide examples against an exact,
+  verified published wheel in a separate locked environment. Development
+  changes and release preparation no longer replace the released API reference.
+  Prepared changelog entries stay out of the public site until its edition is
+  advanced after publication.
+
+### Release validation and publishing
+
+- Build distributions once in the validation workflow, check their versions and
+  metadata, and smoke-test clean wheel and source-distribution installations.
+  The publishing job downloads that verified artifact by its immutable ID
+  rather than rebuilding it with publishing credentials available.
+- Pin the Hatchling build backend and publishing/validation tool revisions.
+  Retain the supported Python matrix, Windows coverage, and minimum-NumPy check.
+- Configure environment-bound Trusted Publishers for the organization-owned
+  repository and document post-upload provenance and installation checks.
+  Production cutover is confirmed only after an authorized upload passes those
+  checks; the new configuration is not treated as verified merely because it
+  is present.
+- Add independent documentation CI that checks the built site and runs rendered
+  examples. Pages publication requires successful docs CI for the exact source
+  commit, and branch previews are marked not to be indexed.
+
+### Upgrade notes
+
+- Continue supporting Python 3.11 through 3.14 and NumPy 1.23.2 or newer.
+- Keep the existing methods, arguments, result types, and input-error categories.
+- Continue reading and writing trusted format-version-1 archives without
+  conversion. Opaque metadata still uses pickle-backed object arrays; do not
+  open untrusted archives.
+- No new feature family, API removal, runtime dependency, or archive migration
+  is introduced. These are corrections within the existing 0.7 contract, not
+  the separate 1.0 stability declaration.
+
 <!-- --8<-- [start:published] -->
 
 ## 0.7.0 - 2026-08-24
