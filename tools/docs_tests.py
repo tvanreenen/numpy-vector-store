@@ -4,6 +4,10 @@ from __future__ import annotations
 
 import io
 import json
+import os
+import subprocess
+import sys
+import tomllib
 import unittest
 from email.message import Message
 from pathlib import Path
@@ -15,7 +19,14 @@ from urllib.parse import parse_qs, urlsplit
 
 from docs_gate import REPOSITORY, latest_run, wait_for_docs_ci
 
-from docs import Page, prepare_pages_output
+from docs import (
+    DOCS_PROJECT,
+    ROOT,
+    Page,
+    enter_docs_environment,
+    prepare_pages_output,
+    verify_edition,
+)
 
 SHA = "a" * 40
 
@@ -154,6 +165,132 @@ class DocsGateTests(unittest.TestCase):
             self.assertRaisesRegex(RuntimeError, "refusing deployment"),
         ):
             wait_for_docs_ci(SHA, "main")
+
+
+class ReleasedEditionTests(unittest.TestCase):
+    def test_installed_release_matches_published_identity(self) -> None:
+        verify_edition()
+
+    def test_unreleased_checkout_source_does_not_change_the_public_edition(
+        self,
+    ) -> None:
+        with TemporaryDirectory() as directory:
+            checkout = Path(directory)
+            (checkout / "zensical.toml").write_text(
+                (ROOT / "zensical.toml").read_text()
+            )
+            package = checkout / "src" / "numpy_vector_store"
+            package.mkdir(parents=True)
+            (package / "__init__.py").write_text(
+                '__version__ = "99.0.0"\nraise RuntimeError("unreleased source imported")\n'
+            )
+            with patch("docs.ROOT", checkout):
+                verify_edition()
+
+    def test_version_status_source_and_renderer_mismatches_are_rejected(self) -> None:
+        original = tomllib.loads((ROOT / "zensical.toml").read_text())
+        for key, value, message in (
+            ("docs_version", "99.0.0", "versions do not agree"),
+            ("docs_status", "development", "released edition"),
+            ("api_source_sha256", "0" * 64, "differs from the verified"),
+            ("paths", ["src"], "explicit source paths"),
+        ):
+            config = json.loads(json.dumps(original))
+            if key == "paths":
+                config["project"]["plugins"]["mkdocstrings"]["handlers"]["python"][
+                    key
+                ] = value
+            else:
+                config["project"]["extra"][key] = value
+            with (
+                self.subTest(key=key),
+                patch("docs.tomllib.loads", return_value=config),
+                self.assertRaisesRegex(RuntimeError, message),
+            ):
+                verify_edition()
+
+    def test_checkout_import_is_rejected_even_when_version_matches(self) -> None:
+        # Do not depend on the real checkout retaining the published version.
+        config = tomllib.loads((ROOT / "zensical.toml").read_text())
+        released_version = config["project"]["extra"]["docs_version"]
+        with TemporaryDirectory() as directory:
+            package = Path(directory) / "numpy_vector_store"
+            package.mkdir()
+            (package / "__init__.py").write_text(
+                f"__version__ = {released_version!r}\n"
+            )
+            environment = os.environ.copy()
+            environment["PYTHONPATH"] = directory
+            result = subprocess.run(
+                [
+                    sys.executable,
+                    "-c",
+                    "from docs import verify_edition; verify_edition()",
+                ],
+                cwd=ROOT / "tools",
+                env=environment,
+                capture_output=True,
+                text=True,
+                timeout=30,
+                check=False,
+            )
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("not checkout source", result.stderr)
+
+    def test_launcher_preserves_uv_path_and_cleans_environment_overrides(self) -> None:
+        with (
+            patch("docs.sys.prefix", "/not-the-docs-environment"),
+            patch.dict(
+                os.environ,
+                {
+                    "UV": "/uv/uv",
+                    "PYTHONPATH": "/source",
+                    "UV_PROJECT_ENVIRONMENT": "/source/.venv",
+                },
+            ),
+            patch(
+                "docs.subprocess.run", return_value=subprocess.CompletedProcess([], 7)
+            ) as run,
+            self.assertRaises(SystemExit) as exit_result,
+        ):
+            enter_docs_environment("pages")
+        self.assertEqual(exit_result.exception.code, 7)
+        args, kwargs = run.call_args
+        self.assertEqual(args[0][0], "/uv/uv")
+        self.assertIn("--locked", args[0])
+        self.assertIn("--no-env-file", args[0])
+        self.assertEqual(args[0][-1], "pages")
+        self.assertNotIn("PYTHONPATH", kwargs["env"])
+        self.assertNotIn("UV_PROJECT_ENVIRONMENT", kwargs["env"])
+
+    def test_launcher_does_not_fall_back_after_isolated_install_failure(self) -> None:
+        with (
+            patch("docs.sys.prefix", "/not-the-docs-environment"),
+            patch.dict(os.environ, {"UV": "/uv/uv"}),
+            patch(
+                "docs.subprocess.run",
+                side_effect=subprocess.CalledProcessError(1, "uv"),
+            ),
+            self.assertRaises(subprocess.CalledProcessError),
+        ):
+            enter_docs_environment("check")
+
+    def test_launcher_does_not_reenter_the_docs_environment(self) -> None:
+        with (
+            patch("docs.sys.prefix", str(DOCS_PROJECT / ".venv")),
+            patch("docs.subprocess.run") as run,
+        ):
+            enter_docs_environment("check")
+        run.assert_not_called()
+
+    def test_launcher_requires_uv_instead_of_using_local_source(self) -> None:
+        with (
+            patch("docs.sys.prefix", "/not-the-docs-environment"),
+            patch.dict(os.environ, {"UV": ""}),
+            patch("docs.shutil.which", return_value=None),
+            self.assertRaisesRegex(RuntimeError, "Install uv"),
+        ):
+            enter_docs_environment("check")
 
 
 class RenderedHTMLTests(unittest.TestCase):

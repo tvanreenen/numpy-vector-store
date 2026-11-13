@@ -89,7 +89,8 @@ pymdownx.snippets.base_path = ["."]
 pymdownx.snippets.check_paths = true
 
 [project.plugins.mkdocstrings.handlers.python]
-paths = ["src"]
+# Resolve the verified release installed in tools/docs-env, never the checkout.
+paths = []
 
 [project.plugins.mkdocstrings.handlers.python.options]
 docstring_style = "google"

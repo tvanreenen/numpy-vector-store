@@ -3,22 +3,45 @@
 The documentation is a static Zensical site in the library repository. It has
 no service, authentication, paid search, JavaScript package manager, or runtime
 Python dependency beyond the library's existing NumPy requirement. Documentation
-tools are pinned in the `docs` dependency group and `uv.lock`.
+tools and the published package used by the site are pinned independently in
+`tools/docs-env/pyproject.toml` and its `uv.lock`.
+
+## How the pieces fit
+
+Library development and public documentation need different copies of NVS.
+Library tests use the code being developed; the public reference and guide
+examples use the published release that readers can install.
+
+`tools/docs-env/` is the documentation's toolbox. Its `pyproject.toml` lists
+the released NVS package and documentation tools, and its `uv.lock` records
+their exact dependencies and artifact hashes. uv installs them into a generated,
+ignored `.venv/` inside that folder. This is a build-only environment, not
+another library to publish. The documentation itself still lives in `docs/`.
+
+`tools/docs.py` supplies the build instructions. It checks that the installed
+package matches the documented release, builds the site, checks links and
+metadata, and runs the displayed examples. Its `serve` command previews the
+site locally; its `pages` command also checks publication eligibility and
+prepares preview indexing rules.
+
+Your laptop, GitHub Actions, and Cloudflare use the same toolbox and script.
+The build writes static files to `site/`. Visitors receive those files; neither
+Python nor the documentation environment runs when they visit the website.
 
 ## Build and preview
 
 ```sh
-uv sync --locked --no-default-groups --group docs
-uv run --locked --no-default-groups --group docs python tools/docs_tests.py
-uv run --locked --no-default-groups --group docs python tools/docs.py check
-uv run --locked --no-default-groups --group docs zensical serve
+uv sync --project tools/docs-env --locked
+uv run --project tools/docs-env --locked python tools/docs_tests.py
+uv run --project tools/docs-env --locked python tools/docs.py check
+uv run --project tools/docs-env --locked python tools/docs.py serve
 ```
 
-The preview listens on `http://127.0.0.1:8000`. For an isolated environment,
-prefix the commands with `UV_PROJECT_ENVIRONMENT=.venv-docs`. `site/` is generated
-and ignored. After changing configuration or theme overrides, restart the live
-server if necessary. Run `tools/docs.py check` for a clean publication build;
-the development server is not the verification gate.
+The preview listens on `http://127.0.0.1:8000`. Its environment is
+`tools/docs-env/.venv`, separate from the library's development environment.
+`site/` is generated and ignored. After changing configuration or theme overrides,
+restart the live server if necessary. Run `tools/docs.py check` for a clean
+publication build; the development server is not the verification gate.
 
 `check` verifies the edition, runs a clean strict build, checks all rendered
 local links and anchors, inspects public API rendering and search coverage,
@@ -26,7 +49,16 @@ checks titles/descriptions/canonical/Open Graph URLs and sitemap/robots, and
 executes the Python examples extracted from the built guide HTML. Their printed
 outputs must match the outputs displayed on the page. Old migration examples
 are intentionally not executed against the current API. External links are not
-network-checked in CI.
+network-checked in CI. Installing the locked environment needs access to the
+pinned artifacts unless they are already cached. Installation failures stop the
+build; there is no fallback to checkout source or another release.
+
+With uv installed, `python tools/docs.py check` and `python tools/docs.py serve`
+also enter the isolated environment automatically. The launcher removes inherited
+Python import paths and environment-location overrides before invoking the
+locked docs project. Documentation builds do not install the root library
+project or its development dependencies. There is no root `docs` dependency
+group; select `tools/docs-env` when invoking uv directly.
 
 ## Content and canonical sources
 
@@ -36,7 +68,7 @@ network-checked in CI.
 | Quick start | `README.md`, `quickstart` snippet | Included on the home page; executed from rendered HTML |
 | Reference measurements | `README.md`, `performance` snippet | Included in `docs/performance.md` without copying numbers |
 | Guide examples | `docs/examples/*.py` | Included in guide code fences; executed from rendered HTML |
-| Supported API signatures/docstrings | `src/numpy_vector_store/` | mkdocstrings directives with an explicit member allowlist in `docs/reference.md` |
+| Supported API signatures/docstrings | Verified PyPI wheel pinned in `tools/docs-env/` | Installed-package discovery with an explicit member allowlist in `docs/reference.md` |
 | Compatibility | `COMPATIBILITY.md` | Snippet wrapper at `docs/COMPATIBILITY.md` |
 | Historical migration | `MIGRATION.md` | Snippet wrapper at `docs/MIGRATION.md` |
 | Release history | `CHANGELOG.md` | Snippet wrapper at `docs/CHANGELOG.md` |
@@ -56,25 +88,47 @@ The built site includes only the curated `docs/` tree. Theme override sources
 are excluded. Maintainer release, ownership-transfer, and roadmap notes are not
 copied into the site. Docs source, output, tooling, and this contributor guide
 are excluded from the source distribution, and the wheel remains package-only.
-`pyproject.toml` and its docs dependency-group declaration remain in the source
-distribution as build metadata; docs dependencies are not `Requires-Dist`.
+`pyproject.toml` remains in the source distribution as build metadata. The
+independent docs project and its lockfile are excluded; docs tools are not
+runtime dependencies of the library.
 
 ## Edition and framework qualification
 
-This first edition describes the published **0.7.0** release. Its Python source
-(`__init__.py`, `vector_store.py`, and `py.typed`) was compared byte-for-byte
-with the public PyPI 0.7.0 wheel. The `docs_version`, `docs_status`, and
-`api_source_sha256` settings record that boundary. A released build fails if the
-package version or verified source changes, preventing unreleased code from
-silently appearing under a stable label.
+The public edition describes the published **0.7.0** release. The docs project
+pins its exact PyPI wheel URL; the independent lockfile records the wheel's
+SHA-256 hash and the resolved documentation dependencies. `docs_version`,
+`docs_status = "released"`, and `api_source_sha256` in `zensical.toml` record the
+expected package identity. The source digest covers each filename, a NUL byte,
+and its file bytes for `__init__.py`, `vector_store.py`, and `py.typed`, in that
+order.
 
-For a future development edition, set `docs_status = "development"`, update
-`docs_version` to the source version, and revise version claims in the home page,
-getting-started page, reference, and persistence guide. For the next released
-edition, verify the published wheel again before updating the source digest and
-returning the status to `released`. The digest is SHA-256 over each filename,
-a NUL byte, and its file bytes, in the order listed above. No historical-version
-selector is needed for this first edition.
+The build verifies the installed package version and source digest and rejects
+checkout imports or explicit source paths in the API renderer. Reference
+generation and rendered examples use that same installed release. Changing the
+development source or version does not advance or invalidate the public edition.
+Library checks continue to exercise the checkout independently.
+
+Keep public prose, shared README snippets, policy/history documents, and examples
+aligned with the pinned release. Examples test executable claims, but cannot
+prove every statement in prose. Do not include unreleased behavior in these
+sources merely because the development implementation supports it. The public
+build does not accept a development edition or automatically select the latest
+package from PyPI.
+
+After an independently authorized release has uploaded and passed verification:
+
+1. Update the exact version and wheel URL in `tools/docs-env/pyproject.toml`.
+2. Regenerate its lockfile with `uv lock --project tools/docs-env` and compare
+   the wheel hash with PyPI's published metadata.
+3. Verify the wheel's package source, then update `docs_version` and
+   `api_source_sha256`. Keep `docs_status = "released"`.
+4. Review release-specific wording in the guides, reference, README, changelog,
+   and compatibility policy. Run the docs tooling tests and full build before
+   merging the edition update.
+
+The previous edition remains public until this update is deployed. Roll back an
+edition with its matching pin, lockfile, digest, and prose, not by pointing an
+old label at a different package. No historical-version selector is required.
 
 The qualified tools are **Zensical 0.1.1** and **mkdocstrings-python 2.0.10**.
 The real landing page and public reference passed a strict static build, API
@@ -94,16 +148,17 @@ and keyboard interactions use the theme's existing components.
 ## Documentation CI
 
 `.github/workflows/docs.yml` is independent of the library checks and publishing
-workflows. It installs only the docs group plus the local package, tests the
-publication gate offline, builds the site strictly, verifies the generated
-content, executes guide examples, and retains the verified static output as an
+workflows. It installs the independent locked docs project and published package,
+tests the publication gate offline, builds the site strictly, verifies the
+generated content, executes guide examples, and retains the verified static output as an
 artifact. Remote Actions use the same pinned revisions as the existing checks.
 
 It runs on PRs and every branch push. This is intentionally a small docs-only
 workflow without path filters: a future Pages build of any source revision can
-always require successful CI for that exact SHA. A package-only edit can change
-API rendering too. The library release workflows do not call the docs workflow;
-browser checks and external-link checks do not become package release gates.
+always require successful CI for that exact SHA. A package-only edit does not
+change the public API reference. The library release workflows do not call the
+docs workflow; browser checks and external-link checks do not become package
+release gates.
 
 For visual changes, separately test Chromium and WebKit at desktop and mobile
 widths, a 320px reflow width, 200% zoom, light/dark/system palettes, keyboard
@@ -137,14 +192,24 @@ Use these settings in both production and preview environments:
 | Build command | Command below |
 
 ```sh
-python -m pip install uv==0.13.7 && python -m uv sync --locked --no-default-groups --group docs && python -m uv run --locked --no-default-groups --group docs python tools/docs.py pages
+python -m pip install uv==0.13.7 && python -m uv run --project tools/docs-env --locked python tools/docs.py pages
 ```
 
-Disabling automatic dependency installation lets the build command install the
-pinned uv version before reading the lockfile and install only the docs group
-plus the local package.
+Pages starts directly in the documentation environment, without first installing
+the root library project. `uv run --locked` installs or reuses the locked
+documentation dependencies before running the script; a separate sync step is
+not needed.
 Invoke uv through the same Python interpreter that installed it: newly installed
 executables may not appear on the Pages shell's PATH until its shims refresh.
+
+The build command is a project-wide setting shared by production and previews.
+When adopting this command, first push a branch containing `tools/docs-env/`,
+then update the Pages setting and verify that branch's exact-commit preview.
+Merge that branch to make the command work for subsequent `main` builds too.
+Between the setting change and merge, builds of older revisions without the
+docs project will fail; the existing deployed website stays available. Rebuilding
+an older revision requires restoring its matching build command. Rolling back
+to an existing successful deployment does not require rebuilding it.
 
 Pages supplies `CF_PAGES_COMMIT_SHA` and `CF_PAGES_BRANCH`. The `pages` command
 checks the checkout SHA and tracked cleanliness, then polls the public GitHub

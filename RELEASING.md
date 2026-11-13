@@ -63,6 +63,12 @@ The release workflow requires the source version, wheel metadata, source-distrib
 
 TestPyPI publication is a separate manual workflow. It builds and validates the selected commit through the same `Checks` workflow, but it has no release tag to compare. Use it for an end-to-end publishing probe when the selected version is not already present on TestPyPI.
 
+## Public documentation after publication
+
+The website builds against a verified published wheel, not the development checkout. Source fixes and version preparation can therefore merge without changing the public API reference or breaking its release-identity check. Keep public guide prose and shared snippets aligned with the documented release until the edition update.
+
+After the actual PyPI upload, file/provenance checks, and clean installation pass, prepare a documentation-edition update using the checklist in [DOCUMENTATION.md](DOCUMENTATION.md#edition-and-framework-qualification). Pin the new published version and exact wheel URL in `tools/docs-env/pyproject.toml`, regenerate its lockfile, verify the package-source digest, and update the edition and release-specific prose. The previous edition remains public until that update passes documentation CI and deploys. Do not update the verified digest to unreleased checkout source or publish a package solely to unblock docs.
+
 ## Ownership and publishing environments
 
 The canonical repository is `tvr-works/numpy-vector-store`. The PyPI and TestPyPI projects remain owned by the individual `tvanreenen` account. GitHub organization ownership and Python package index ownership are independent; a PyPI organization, shared account, or additional human owner is not required for this project's solo-maintainer model.
