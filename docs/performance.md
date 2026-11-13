@@ -9,6 +9,23 @@ Exact search scores every selected row. Budget for vector dimensions, metadata,
 temporary arrays, and your query rate. Validate representative workloads on your
 hardware before deciding whether an in-process collection fits.
 
+## Collections and replicas
+
+Small-to-medium describes the collection in each process, not a limit on the
+number of workers or replicas. A read-mostly archive can be distributed with
+an application image and loaded independently by each worker. See the
+[deployment guide](deployment.md) for that pattern.
+
+Budget for a separate in-memory store per worker, even when several workers run
+inside one container. A compressed `.npz` file's size is not its loaded memory
+requirement. Loading and validating an archive also allocates temporary arrays;
+measure startup peak memory as well as steady-state search memory.
+
+Consider an indexed or service-backed system when collection size, query load,
+or per-worker memory makes local exact search impractical. Frequent updates that
+must become visible across all replicas need application-level distribution and
+coordination or a shared service; the library does not synchronize stores.
+
 ## Memory and workload shape
 
 The active vector matrix alone needs `rows × dimensions × 4` bytes. This excludes

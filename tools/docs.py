@@ -24,6 +24,7 @@ EXAMPLE_PAGES = (
     "search.md",
     "persistence.md",
     "ownership.md",
+    "deployment.md",
 )
 PUBLIC_MEMBERS = (
     "dimensions",

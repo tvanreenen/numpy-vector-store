@@ -12,18 +12,18 @@ A fast, lightweight, zero-setup in-memory vector store powered by NumPy.
   `.npz` archives
 - **No framework opinions**: bring your own embeddings, chunking, async, and metadata model
 
-## Is this a fit?
+## Why NumPy Vector Store?
 
-Use NumPy Vector Store when your collection fits comfortably in one Python
-process, exact search meets your latency needs, and your application already
-owns its embeddings and metadata. It is designed for small-to-medium collections
-that do not need a separate database or search service.
+Sometimes you need vector search, not another service to operate.
 
-Choose an indexed or service-backed system when you routinely work with millions
-of vectors, need approximate search, or require shared access across processes
-or machines. Transactions, coordinated concurrent writers, and a metadata query
-engine are outside this library's scope. See [Performance](#performance) for
-measured reference points and memory costs.
+Keep embeddings and metadata inside your Python application. Search them exactly
+with NumPy, save them to a single archive, and ship that archive alongside your
+code. There is no server to deploy, index to configure, or framework to adopt.
+
+For collections that fit comfortably in memory, each worker or cloud replica can
+load its own store and serve searches locally. You bring the embeddings; your
+existing build and deployment process can distribute the data without a separate
+vector database or a network hop for search.
 
 ## Installation
 
@@ -130,7 +130,27 @@ also need coordination; atomic file replacement is not a lock or a transaction.
 See [state, views, and threading](https://vectors.tvr.works/ownership/) for
 ownership and synchronization rules.
 
+### Ship a store with your application
+
+Build a trusted `.npz` archive, include it in your application image, and load it
+once at startup in each worker. Multiple processes or replicas can search their
+own in-memory copies of the same collection. For read-mostly data, updates can
+travel with a new application image rather than through a shared data service.
+
+Each process owns independent state: changes in one do not update the others.
+Budget memory per worker, and coordinate collection updates through your rollout.
+See [shipping a store with your application](https://vectors.tvr.works/deployment/)
+for preparation, startup, memory, and update guidance.
+
 ## Performance
+
+### Scope and practical limits
+
+Small-to-medium describes the collection each process holds, not the number of
+replicas serving it. Use an indexed or service-backed system when exact-search
+cost or per-worker memory no longer fits your workload. Transactions, automatic
+cross-process updates, and coordinated writes to a shared archive are outside
+this library's scope.
 
 <!-- --8<-- [start:performance] -->
 

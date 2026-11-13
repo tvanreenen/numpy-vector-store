@@ -13,18 +13,18 @@ search by cosine similarity, dot product, or Euclidean distance.
 Made for small-to-medium collections in memory. Every search scores every
 selected row, with no approximate index or background service.
 
-## Is this a fit?
+## Search locally, deploy with your application
 
-Use it when a collection fits comfortably in your Python process and exact
-search meets your latency needs. Your application supplies the embeddings and
-metadata; the store adds search and explicit local persistence without a service
-to operate.
+Sometimes you need vector search, not another service to operate. Save your
+collection to a single archive and ship it alongside your code. Each worker or
+cloud replica can load its own in-memory store and serve searches locally,
+without a separate vector database or a network hop for search.
 
-Choose an indexed or service-backed system for collections that routinely reach
-millions of vectors, approximate search, or shared access across machines or
-processes. This library does not provide transactions, coordinated writers, or
-a metadata query engine. See [practical limits](performance.md) for memory costs
-and reference measurements before sizing your collection.
+For read-mostly collections, your existing image build and deployment process
+can distribute both the application and its search data. Independent stores
+are the design, not a restriction to a single replica. Start with
+[shipping a store with your application](deployment.md), or check the
+[practical limits](performance.md) to budget memory and query costs.
 
 ## Install
 
@@ -63,6 +63,7 @@ default. Choose `normalize=False` when magnitude matters.
 | Understand vector shapes, metadata, and results | [Getting started](getting-started.md) |
 | Choose a metric or restrict the candidate rows | [Search and filtering](search.md) |
 | Save, open, or refresh a local archive | [Persistence](persistence.md) |
+| Ship one collection to multiple workers or replicas | [Shipping a store with your application](deployment.md) |
 | Work with read-only views and concurrent access | [State, views, and threading](ownership.md) |
 | Look up a signature | [API reference](reference.md) |
 | Size a collection for your workload | [Performance and practical limits](performance.md) |

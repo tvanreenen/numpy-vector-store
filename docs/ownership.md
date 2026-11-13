@@ -56,3 +56,12 @@ changing store. Separate instances or processes writing one destination also
 need external writer coordination; the last successful replacement can win.
 
 These ownership rules are part of the [public compatibility contract](COMPATIBILITY.md).
+
+## Independent workers and replicas
+
+Multiple processes can each open the same trusted archive and search their own
+in-memory store. The library does not synchronize these stores: `add()`,
+`clear()`, and metadata changes in one process do not change another process's
+state. Read-mostly replicas do not need a shared writable archive. See
+[shipping a store with your application](deployment.md) for an image-based
+deployment pattern and update boundaries.
