@@ -209,20 +209,31 @@ class ReleasedEditionTests(unittest.TestCase):
             ):
                 verify_edition()
 
-    def test_checkout_import_is_rejected_even_when_source_and_version_match(
-        self,
-    ) -> None:
-        environment = os.environ.copy()
-        environment["PYTHONPATH"] = str(ROOT / "src")
-        result = subprocess.run(
-            [sys.executable, "-c", "from docs import verify_edition; verify_edition()"],
-            cwd=ROOT / "tools",
-            env=environment,
-            capture_output=True,
-            text=True,
-            timeout=30,
-            check=False,
-        )
+    def test_checkout_import_is_rejected_even_when_version_matches(self) -> None:
+        # Do not depend on the real checkout retaining the published version.
+        config = tomllib.loads((ROOT / "zensical.toml").read_text())
+        released_version = config["project"]["extra"]["docs_version"]
+        with TemporaryDirectory() as directory:
+            package = Path(directory) / "numpy_vector_store"
+            package.mkdir()
+            (package / "__init__.py").write_text(
+                f"__version__ = {released_version!r}\n"
+            )
+            environment = os.environ.copy()
+            environment["PYTHONPATH"] = directory
+            result = subprocess.run(
+                [
+                    sys.executable,
+                    "-c",
+                    "from docs import verify_edition; verify_edition()",
+                ],
+                cwd=ROOT / "tools",
+                env=environment,
+                capture_output=True,
+                text=True,
+                timeout=30,
+                check=False,
+            )
         self.assertNotEqual(result.returncode, 0)
         self.assertIn("not checkout source", result.stderr)
 
