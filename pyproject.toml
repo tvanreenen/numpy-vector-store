@@ -50,6 +50,7 @@ exclude = [
     "/tools/docs.py",
     "/tools/docs_gate.py",
     "/tools/docs_tests.py",
+    "/tools/docs-env",
     "/.github/workflows/docs.yml",
 ]
 
@@ -97,7 +98,5 @@ dev = [
     "pytest-cov>=4.0.0",
     "ruff>=0.13.3",
 ]
-docs = [
-    "mkdocstrings-python==2.0.10",
-    "zensical==0.1.1",
-]
+# Compatibility for the existing Pages bootstrap; tools live in tools/docs-env.
+docs = []

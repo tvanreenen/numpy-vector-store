@@ -36,15 +36,16 @@ jobs:
           version: "0.13.7"
           python-version: "3.13"
           enable-cache: true
+          cache-dependency-glob: tools/docs-env/uv.lock
 
       - name: Install documentation tools
-        run: uv sync --locked --no-default-groups --group docs
+        run: uv sync --project tools/docs-env --locked
 
       - name: Test documentation tooling
-        run: uv run --locked --no-default-groups --group docs python tools/docs_tests.py
+        run: uv run --project tools/docs-env --locked python tools/docs_tests.py
 
       - name: Build, validate links, and execute rendered examples
-        run: uv run --locked --no-default-groups --group docs python tools/docs.py check
+        run: uv run --project tools/docs-env --locked python tools/docs.py check
 
       - name: Keep the verified static site for review
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2

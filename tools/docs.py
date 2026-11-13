@@ -6,11 +6,14 @@ import argparse
 import hashlib
 import json
 import os
+import shutil
 import subprocess
 import sys
+import sysconfig
 import tomllib
 from dataclasses import dataclass, field
 from html.parser import HTMLParser
+from importlib.metadata import version
 from pathlib import Path
 from tempfile import TemporaryDirectory
 from urllib.parse import unquote, urljoin, urlsplit
@@ -18,6 +21,7 @@ from xml.etree import ElementTree
 
 ROOT = Path(__file__).resolve().parents[1]
 SITE = ROOT / "site"
+DOCS_PROJECT = ROOT / "tools" / "docs-env"
 EXAMPLE_PAGES = (
     "index.md",
     "getting-started.md",
@@ -126,27 +130,42 @@ def read_page(path: Path) -> Page:
 
 
 def verify_edition() -> None:
-    """A released edition must keep using its verified published API source."""
+    """Only the pinned installed release may supply public reference and examples."""
     import numpy_vector_store
 
     config = tomllib.loads((ROOT / "zensical.toml").read_text())["project"]
     extra = config["extra"]
     require(
-        extra["docs_version"] == numpy_vector_store.__version__,
-        "Update docs_version to match the package",
+        config["plugins"]["mkdocstrings"]["handlers"]["python"]["paths"] == [],
+        "API rendering must use the installed release, not explicit source paths",
     )
-    require(extra["docs_status"] in ("released", "development"), "Unknown docs_status")
+    require(
+        extra["docs_version"]
+        == numpy_vector_store.__version__
+        == version("numpy-vector-store"),
+        "Documentation and installed release versions do not agree",
+    )
+    require(
+        extra["docs_status"] == "released", "Public docs require a released edition"
+    )
+    require(numpy_vector_store.__file__ is not None, "Package has no source file")
+    package = Path(str(numpy_vector_store.__file__)).resolve().parent
+    require(
+        package == Path(sysconfig.get_path("purelib")).resolve() / "numpy_vector_store",
+        f"Documentation must use the installed release, not checkout source: {package}",
+    )
     digest = hashlib.sha256()
     for name in ("__init__.py", "vector_store.py", "py.typed"):
         digest.update(name.encode())
         digest.update(b"\0")
-        digest.update((ROOT / "src" / "numpy_vector_store" / name).read_bytes())
-    if extra["docs_status"] == "released":
-        require(
-            digest.hexdigest() == extra["api_source_sha256"],
-            "Source differs from the verified release. Mark the docs as development or qualify the next published release.",
-        )
-    print(f"Documentation edition: {extra['docs_version']} ({extra['docs_status']})")
+        digest.update((package / name).read_bytes())
+    require(
+        digest.hexdigest() == extra["api_source_sha256"],
+        "Installed package source differs from the verified published release",
+    )
+    print(
+        f"Documentation edition: {extra['docs_version']} ({extra['docs_status']}) from {package}"
+    )
 
 
 def verify_site() -> None:
@@ -315,18 +334,62 @@ def prepare_pages_output(site: Path, branch: str) -> None:
         (site / "robots.txt").write_text("User-agent: *\nDisallow: /\n")
 
 
+def enter_docs_environment(command: str) -> None:
+    """Keep legacy callers working without importing their editable package."""
+    if Path(sys.prefix).resolve() != (DOCS_PROJECT / ".venv").resolve():
+        environment = os.environ.copy()
+        for key in (
+            "PYTHONPATH",
+            "PYTHONHOME",
+            "VIRTUAL_ENV",
+            "UV_PROJECT_ENVIRONMENT",
+            "UV_ISOLATED",
+            "UV_NO_SYNC",
+            "UV_FROZEN",
+            "UV_NO_PROJECT",
+        ):
+            environment.pop(key, None)
+        uv = os.environ.get("UV") or shutil.which("uv")
+        require(uv is not None, "Install uv before building documentation")
+        result = subprocess.run(
+            [
+                str(uv),
+                "run",
+                "--project",
+                str(DOCS_PROJECT),
+                "--locked",
+                "--no-env-file",
+                "python",
+                str(Path(__file__).resolve()),
+                command,
+            ],
+            cwd=ROOT,
+            env=environment,
+            check=False,
+        )
+        raise SystemExit(result.returncode)
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument(
         "command",
-        choices=("check", "site", "examples", "pages"),
+        choices=("check", "site", "examples", "pages", "serve"),
         default="check",
         nargs="?",
     )
     args = parser.parse_args()
+    enter_docs_environment(args.command)
+    if args.command == "serve":
+        verify_edition()
+        subprocess.run(
+            [sys.executable, "-m", "zensical", "serve"], cwd=ROOT, check=True
+        )
+        return
     if args.command == "site":
         verify_site()
     elif args.command == "examples":
+        verify_edition()
         verify_examples()
     else:
         if args.command == "pages":
