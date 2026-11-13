@@ -44,11 +44,13 @@ network-checked in CI.
 | Theme and metadata | `zensical.toml`, `docs/assets/`, `docs/overrides/` | Native modern theme plus small CSS/template overrides |
 
 Uppercase policy/history paths preserve the relative links shared by the
-repository documents. Existing GitHub file links remain useful. No public site
-URLs predate this first version, so no legacy site redirects are needed. The
-README remains a standalone package introduction, installation guide, executable
-quick start, benchmark record, and usage summary for GitHub and PyPI. Detailed
-guide prose belongs in `docs/`; summaries in the README should stay short.
+repository documents. Existing GitHub file links remain useful. The documentation
+first appeared at `https://nvs.tvr.works/`; that address redirects to the
+canonical `https://vectors.tvr.works/` site and should remain available for
+existing links. The README remains a standalone package introduction,
+installation guide, executable quick start, benchmark record, and usage summary
+for GitHub and PyPI. Detailed guide prose belongs in `docs/`; summaries in the
+README should stay short.
 
 The built site includes only the curated `docs/` tree. Theme override sources
 are excluded. Maintainer release, ownership-transfer, and roadmap notes are not
@@ -114,7 +116,7 @@ dependency or flaky browser step in package CI.
 
 No hosting project, DNS record, GitHub secret, package publisher, or account
 setting is created by the local build. The canonical URL is
-`https://nvs.tvr.works/`. If it changes, update `site_url` in `zensical.toml`
+`https://vectors.tvr.works/`. If it changes, update `site_url` in `zensical.toml`
 and the sitemap URL in `docs/robots.txt`, then rerun the checks.
 
 The Cloudflare Pages project is `nvs`, with the provider hostname
@@ -160,15 +162,15 @@ requires no Cloudflare token in GitHub. Fork PRs can run docs CI, but cannot
 substitute for a same-repository branch push when authorizing a Pages preview.
 
 The generated top-level `404.html` supports Pages' normal static 404 behavior.
-Production canonical tags always point to the proposed production domain.
+Production canonical tags always point to the canonical documentation domain.
 The `pages` command adds `X-Robots-Tag: noindex, nofollow` and a disallowing
 `robots.txt` to branch previews. Production keeps the indexed robots/sitemap.
 
-After authorization, verify one main production build, a same-repository branch
-preview, the live exact-SHA gate, preview noindex headers, and custom-domain/DNS
-behavior. Those hosted interactions cannot be proven by this local milestone.
-Use the pinned static artifact or an earlier known-good Pages deployment for
-rollback; package publishing remains separate.
+After a hosting, branch-control, or custom-domain change, verify a main
+production build, a same-repository branch preview, the live exact-SHA gate,
+preview noindex headers, and custom-domain/DNS behavior. These hosted acceptance
+checks are outside the local build. Use the pinned static artifact or an earlier
+known-good Pages deployment for rollback; package publishing remains separate.
 
 Cloudflare documents the relevant
 [build variables and output configuration](https://developers.cloudflare.com/pages/configuration/build-configuration/),
