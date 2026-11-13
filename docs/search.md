@@ -17,6 +17,10 @@ There is no approximate nearest-neighbor index.
 | `dot_search` | Larger dot product first | `min_value` | Magnitude-sensitive scoring with raw vectors |
 | `euclidean_search` | Smaller distance first | `max_value` | Nearest coordinates or features with raw vectors |
 
+If your embedding model recommends cosine similarity, keep the default
+`normalize=True` and use `cosine_search()`. Choose another metric or raw storage
+when the model or your application's geometry requires it.
+
 All methods accept `query`, keyword-only `top_k=10`, and `within_rows=None`.
 A threshold removes rows whose computed values do not qualify, before choosing
 the top results. It does not avoid computing the metric for selected rows.

@@ -12,14 +12,145 @@ A fast, lightweight, zero-setup in-memory vector store powered by NumPy.
   `.npz` archives
 - **No framework opinions**: bring your own embeddings, chunking, async, and metadata model
 
-## Why?
+## Why NumPy Vector Store?
 
-This library is purpose-built for small to medium-scale vector search tasks and
-offers a simple alternative to heavyweight vector databases when you do not need
-network services, indexing infrastructure, ingestion pipelines, or domain-specific
-metadata filtering.
+Sometimes you need vector search, not another service to operate.
+
+Keep embeddings and metadata inside your Python application. Search them exactly
+with NumPy, save them to a single archive, and ship that archive alongside your
+code. There is no server to deploy, index to configure, or framework to adopt.
+
+For collections that fit comfortably in memory, each worker or cloud replica can
+load its own store and serve searches locally. You bring the embeddings; your
+existing build and deployment process can distribute the data without a separate
+vector database or a network hop for search.
+
+## Installation
+
+```bash
+uv add numpy-vector-store
+```
+
+With pip:
+
+```bash
+python -m pip install numpy-vector-store
+```
+
+## Quick Start
+
+<!-- --8<-- [start:quickstart] -->
+
+```python
+from numpy_vector_store import VectorStore
+
+store = VectorStore[str](dimensions=3)
+store.add(
+    [[1.0, 0.0, 0.0], [0.0, 1.0, 0.0], [0.0, 0.0, 1.0]],
+    ["x-axis", "y-axis", "z-axis"],
+)
+
+for hit in store.cosine_search([0.9, 0.1, 0.0], top_k=2):
+    print(f"{hit.metadata}: {hit.value:.3f}")
+```
+
+<!-- --8<-- [end:quickstart] -->
+
+`metadata` is an outer sequence with one opaque payload for each vector row.
+Each payload can be a dict, dataclass, tuple, list, string, integer row ID, or
+another Python object that fits your application. Tuple and list payloads remain
+single row values rather than being interpreted as additional array dimensions.
+
+The supported top-level package names are `VectorStore`, `VectorHit`, and
+`__version__`. See the [public API and compatibility policy](COMPATIBILITY.md)
+for the complete interface that the project intends to stabilize at 1.0.
+
+## Core concepts
+
+### Search and normalization
+
+Search by direction with `cosine_search`, by dot product with `dot_search`, or
+by distance with `euclidean_search`. All searches score every selected row.
+Cosine and dot results rank larger values first; Euclidean results rank smaller
+distances first. Exact computed-value ties use the lower original row index,
+including at the `top_k` boundary.
+
+The default `normalize=True` stores unit vectors and normalizes queries.
+Choose `normalize=False` for magnitude-sensitive dot products or raw Euclidean
+geometry. Vectors use `float32` and must remain finite after conversion.
+Complex values are rejected. Normalized stores and cosine queries reject zero
+vectors. See the [search guide](https://vectors.tvr.works/search/) for metric
+selection, thresholds, and input rules.
+
+### Filter candidate rows
+
+Filter metadata in your application, then pass unique integer row indexes as
+`within_rows`. Unfiltered search uses the stored matrix directly; filtered
+search gathers a temporary matrix. There is no metadata query language.
+
+```python
+rows = [i for i, payload in enumerate(store.metadata) if payload.startswith("x")]
+hits = store.cosine_search([1.0, 0.0, 0.0], within_rows=rows)
+```
+
+See [filtering examples](https://vectors.tvr.works/search/#filter-candidates-before-searching)
+for application predicates and NumPy Boolean masks.
+
+### Persist trusted local archives
+
+Save explicitly, then open a new store or refresh one already bound to a file:
+
+```python
+store.save("vectors.npz")       # Write and bind a destination.
+store.save()                    # Update the bound archive.
+loaded = VectorStore[str].open("vectors.npz")
+loaded.reload()                 # Discard memory and reread the archive.
+```
+
+Only open trusted archives: metadata uses NumPy's pickle-backed object arrays.
+Loading untrusted data can execute code. Format-version-1 archives are
+self-describing and retain dimensions and normalization settings. Relative paths
+are anchored when bound; later working-directory changes do not redirect them.
+Writes are always explicit; there is no autosave context manager. See
+[persistence](https://vectors.tvr.works/persistence/) for path handling, archive
+compatibility, and failure behavior.
+
+### State and concurrency
+
+Configuration and row inspection properties are read-only. `get(index)` returns
+an independent vector copy and the shared metadata payload, or `None` when the
+integer row index is outside the store. Inspection views describe the rows
+present when requested; refresh them after mutation. Mutable metadata remains
+application-owned and shared by reference.
+
+Concurrent reads are supported only while store state and shared metadata stay
+unchanged. If any thread may mutate or save, synchronize **every access** to the
+store with the same application-level lock. Separate writers to the same archive
+also need coordination; atomic file replacement is not a lock or a transaction.
+See [state, views, and threading](https://vectors.tvr.works/ownership/) for
+ownership and synchronization rules.
+
+### Ship a store with your application
+
+Build a trusted `.npz` archive, include it in your application image, and load it
+once at startup in each worker. Multiple processes or replicas can search their
+own in-memory copies of the same collection. For read-mostly data, updates can
+travel with a new application image rather than through a shared data service.
+
+Each process owns independent state: changes in one do not update the others.
+Budget memory per worker, and coordinate collection updates through your rollout.
+See [shipping a store with your application](https://vectors.tvr.works/deployment/)
+for preparation, startup, memory, and update guidance.
 
 ## Performance
+
+### Scope and practical limits
+
+Small-to-medium describes the collection each process holds, not the number of
+replicas serving it. Use an indexed or service-backed system when exact-search
+cost or per-worker memory no longer fits your workload. Transactions, automatic
+cross-process updates, and coordinated writes to a shared archive are outside
+this library's scope.
 
 <!-- --8<-- [start:performance] -->
 
@@ -77,100 +208,6 @@ complexity checks in CI, but does not fail shared runners on wall-clock timing.
 
 <!-- --8<-- [end:performance] -->
 
-## Installation
-
-```bash
-uv add numpy-vector-store
-```
-
-With pip:
-
-```bash
-python -m pip install numpy-vector-store
-```
-
-## Quick Start
-
-<!-- --8<-- [start:quickstart] -->
-
-```python
-from numpy_vector_store import VectorStore
-
-store = VectorStore[str](dimensions=3)
-store.add(
-    [[1.0, 0.0, 0.0], [0.0, 1.0, 0.0], [0.0, 0.0, 1.0]],
-    ["x-axis", "y-axis", "z-axis"],
-)
-
-for hit in store.cosine_search([0.9, 0.1, 0.0], top_k=2):
-    print(f"{hit.metadata}: {hit.value:.3f}")
-```
-
-<!-- --8<-- [end:quickstart] -->
-
-`metadata` is an outer sequence with one opaque payload for each vector row.
-Each payload can be a dict, dataclass, tuple, list, string, integer row ID, or
-another Python object that fits your application. Tuple and list payloads remain
-single row values rather than being interpreted as additional array dimensions.
-
-The supported top-level package names are `VectorStore`, `VectorHit`, and
-`__version__`. See the [public API and compatibility policy](COMPATIBILITY.md)
-for the complete interface that the project intends to stabilize at 1.0.
-
-## Search and persistence
-
-Search by direction with `cosine_search`, by dot product with `dot_search`, or
-by distance with `euclidean_search`. All searches score every selected row.
-Cosine and dot results rank larger values first; Euclidean results rank smaller
-distances first. Exact computed-value ties use the lower original row index,
-including at the `top_k` boundary.
-
-The default `normalize=True` stores unit vectors and normalizes queries.
-Choose `normalize=False` for magnitude-sensitive dot products or raw Euclidean
-geometry. Vectors use `float32` and must remain finite after conversion.
-Complex values are rejected. Normalized stores and cosine queries reject zero
-vectors.
-
-Filter metadata in your application, then pass unique integer row indexes as
-`within_rows`. Unfiltered search uses the stored matrix directly; filtered
-search gathers a temporary matrix. There is no metadata query language.
-
-```python
-rows = [i for i, payload in enumerate(store.metadata) if payload.startswith("x")]
-hits = store.cosine_search([1.0, 0.0, 0.0], within_rows=rows)
-
-store.save("vectors.npz")       # Write and bind a destination.
-store.save()                    # Update the bound archive.
-loaded = VectorStore[str].open("vectors.npz")
-loaded.reload()                 # Discard memory and reread the archive.
-```
-
-Only open trusted archives: metadata uses NumPy's pickle-backed object arrays.
-Loading untrusted data can execute code. Format-version-1 archives are
-self-describing and retain dimensions and normalization settings. Relative paths
-are anchored when bound; later working-directory changes do not redirect them.
-Saving uses atomic replacement but does not provide locks or multi-writer
-coordination. Writes are always explicit; there is no autosave context manager.
-
-Configuration and row inspection properties are read-only. `get(index)` returns
-an independent vector copy and the shared metadata payload, or `None` when the
-integer row index is outside the store. Inspection views describe the rows
-present when requested; refresh them after mutation. Mutable metadata remains
-application-owned and shared by reference.
-
-Concurrent reads are supported only while store state and shared metadata stay
-unchanged. If any thread may mutate or save, synchronize **every access** to the
-store with the same application-level lock. Separate writers to the same archive
-also need coordination.
-
-The documentation source lives in [docs/](https://github.com/tvr-works/numpy-vector-store/tree/main/docs).
-The full guides cover
-[search and filtering](https://github.com/tvr-works/numpy-vector-store/blob/main/docs/search.md),
-[persistence](https://github.com/tvr-works/numpy-vector-store/blob/main/docs/persistence.md), and
-[state and threading](https://github.com/tvr-works/numpy-vector-store/blob/main/docs/ownership.md).
-To browse the rendered documentation locally, see
-[the documentation contributor guide](https://github.com/tvr-works/numpy-vector-store/blob/main/DOCUMENTATION.md).
-
 ## Compatibility
 
 This project is still pre-1.0, so occasional breaking changes are expected while
@@ -212,6 +249,9 @@ Before submitting a pull request:
 3. Run `uv run --locked ruff format --check .`
 4. Run `uv run --locked mypy src/ benchmarks/ tools/`
 5. Run `uv run --locked pytest`
+
+The [documentation contributor guide](https://github.com/tvr-works/numpy-vector-store/blob/main/DOCUMENTATION.md)
+explains the site sources, local preview, and documentation checks.
 
 Maintainers should also read the [release and repository transfer runbook](RELEASING.md) before preparing a release or changing publication infrastructure.
 

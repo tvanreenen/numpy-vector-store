@@ -18,7 +18,8 @@ nav = [
     { "Getting started" = "getting-started.md" },
     { "Search and filtering" = "search.md" },
     { "Persistence" = "persistence.md" },
-    { "State and threading" = "ownership.md" },
+    { "Deploying with your application" = "deployment.md" },
+    { "State, views, and threading" = "ownership.md" },
   ] },
   { "API reference" = "reference.md" },
   { "Performance" = [

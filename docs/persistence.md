@@ -9,6 +9,10 @@ Create a store in memory, then save it explicitly. Persistence uses a versioned,
 self-describing `.npz` archive containing vectors, opaque metadata, dimensions,
 and the normalization setting.
 
+An archive can travel with your application image so each worker or replica
+loads an independent store. See [the deployment guide](deployment.md) for
+preparation, startup, and rollout guidance.
+
 !!! warning "Open trusted archives only"
     Metadata uses NumPy's pickle-backed object arrays. Loading a malicious
     archive can execute code. Only open archives produced by your application
