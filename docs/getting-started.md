@@ -14,6 +14,8 @@ Python 3.11–3.14 are tested, and the minimum NumPy version is 1.23.2.
 The library takes vectors you already have. Generate document and query
 embeddings with the same model and use its output width as `dimensions`.
 The store does not call an embedding API, split documents, or download models.
+Each stored row and every query must have that same width. For example, a model
+that returns 384 values per embedding needs `dimensions=384`.
 
 `add()` accepts a two-dimensional real-valued array-like input with shape
 `(rows, dimensions)`. Even one vector needs an outer row dimension:
@@ -34,6 +36,8 @@ default `normalize=True`, zero vectors are also rejected.
 Supply one metadata payload per vector row. A payload can be a dict, dataclass,
 tuple, list, string, integer ID, or another Python object. A tuple or list payload
 remains one opaque row value. A NumPy metadata array must be one-dimensional.
+The first payload belongs to the first vector row, the second to the second,
+and so on. Each `add()` call requires the same number of payloads and rows.
 
 `VectorStore[TMetadata]` carries your payload type through `get()` and search
 results. The type parameter does not validate or transform metadata at runtime.
@@ -68,5 +72,9 @@ Batch your inputs when they already arrive together to reduce per-call overhead.
 `clear()` removes all active rows and releases the store's reserved capacity;
 it retains the dimensions, normalization mode, and archive binding.
 
-Mutation does not save automatically. Continue with [search and filtering](search.md),
-[persistence](persistence.md), or the [state ownership rules](ownership.md).
+Mutation does not save automatically. Next, choose the workflow you need:
+
+- [Search and filtering](search.md) explains metrics, thresholds, and candidate rows.
+- [Persistence](persistence.md) shows how to save and reopen a trusted archive.
+- [State, views, and threading](ownership.md) explains inspection views, shared
+  metadata, and application-level synchronization.

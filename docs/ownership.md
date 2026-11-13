@@ -1,9 +1,9 @@
 ---
-title: State and threading
+title: State, views, and threading
 description: Understand read-only NumPy inspection views, vector copies, shared metadata, and application-owned synchronization.
 ---
 
-# State and threading
+# State, views, and threading {#state-and-threading}
 
 The store owns its configuration and row structure. Your application owns the
 meaning and mutability of its metadata payloads and coordinates concurrent use.
