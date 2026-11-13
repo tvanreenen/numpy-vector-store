@@ -71,7 +71,7 @@ group; select `tools/docs-env` when invoking uv directly.
 | Supported API signatures/docstrings | Verified PyPI wheel pinned in `tools/docs-env/` | Installed-package discovery with an explicit member allowlist in `docs/reference.md` |
 | Compatibility | `COMPATIBILITY.md` | Snippet wrapper at `docs/COMPATIBILITY.md` |
 | Historical migration | `MIGRATION.md` | Snippet wrapper at `docs/MIGRATION.md` |
-| Release history | `CHANGELOG.md` | Snippet wrapper at `docs/CHANGELOG.md` |
+| Release history | `CHANGELOG.md` | Introduction and published-history snippets at `docs/CHANGELOG.md` |
 | Benchmark methodology | `benchmarks/README.md` | Snippet wrapper at `docs/benchmarks/README.md` |
 | Theme and metadata | `zensical.toml`, `docs/assets/`, `docs/overrides/` | Native modern theme plus small CSS/template overrides |
 
@@ -115,6 +115,12 @@ sources merely because the development implementation supports it. The public
 build does not accept a development edition or automatically select the latest
 package from PyPI.
 
+Release preparation can add a new entry to the repository changelog above its
+`published` snippet. The website includes only the introduction and the history
+inside that snippet, so preparing release notes does not announce an unpublished
+package on the released site. Keep the snippet's opening marker immediately
+before the newest release covered by the public documentation edition.
+
 After an independently authorized release has uploaded and passed verification:
 
 1. Update the exact version and wheel URL in `tools/docs-env/pyproject.toml`.
@@ -123,8 +129,9 @@ After an independently authorized release has uploaded and passed verification:
 3. Verify the wheel's package source, then update `docs_version` and
    `api_source_sha256`. Keep `docs_status = "released"`.
 4. Review release-specific wording in the guides, reference, README, changelog,
-   and compatibility policy. Run the docs tooling tests and full build before
-   merging the edition update.
+   and compatibility policy. Move the changelog's `published` opening marker
+   above the newly verified release, and mark its roadmap entry complete. Run
+   the docs tooling tests and full build before merging the edition update.
 
 The previous edition remains public until this update is deployed. Roll back an
 edition with its matching pin, lockfile, digest, and prose, not by pointing an

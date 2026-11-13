@@ -1,8 +1,14 @@
+<!-- --8<-- [start:introduction] -->
+
 # Changelog
 
 This changelog records user-visible changes to NumPy Vector Store. Earlier
 release notes remain available on the
 [GitHub releases page](https://github.com/tvr-works/numpy-vector-store/releases).
+
+<!-- --8<-- [end:introduction] -->
+
+<!-- --8<-- [start:published] -->
 
 ## 0.7.0 - 2026-08-24
 
@@ -540,3 +546,5 @@ intentionally break valid existing usage or change the `.npz` archive format.
 - Environments using NumPy 1.20 must upgrade to NumPy 1.21.3 or newer.
 - Inputs that previously produced `nan`, `inf`, or unreliable rankings now
   raise `ValueError` instead.
+
+<!-- --8<-- [end:published] -->
